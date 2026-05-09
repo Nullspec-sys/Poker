@@ -144,6 +144,66 @@
       text-align: center;
       box-shadow: 0 1px 2px rgba(0,0,0,0.5);
     }
+
+    /* Hand rank display: shows the descriptive name or starting hand */
+    #handRankDisplay {
+      margin-top: 4px;
+      padding: 4px 8px;
+      background-color: #122e18;
+      border-radius: 4px;
+      color: #80cbc4;
+      font-weight: bold;
+      text-align: center;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      font-size: 14px;
+      display: none;
+    }
+
+    /* Winner modal overlay */
+    #winnerModal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    #winnerModal .modal-content {
+      background-color: #0f3413;
+      border-radius: 8px;
+      padding: 20px 30px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.7);
+      color: #ffd700;
+      text-align: center;
+      min-width: 300px;
+    }
+    #winnerModal .modal-content h2 {
+      margin-top: 0;
+      margin-bottom: 12px;
+      font-size: 1.4rem;
+      color: #ffd700;
+    }
+    #winnerModal .modal-content p {
+      margin: 0 0 16px 0;
+      line-height: 1.4;
+    }
+    #nextHandBtn {
+      padding: 8px 18px;
+      font-size: 16px;
+      border: none;
+      border-radius: 4px;
+      background-color: #1e88e5;
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    #nextHandBtn:active {
+      transform: scale(0.96);
+    }
   </style>
 </head>
 <body>
@@ -175,6 +235,7 @@
       <div>
         <h3>Your Hand</h3>
         <div id="playerCards" class="cards"></div>
+        <div id="handRankDisplay"></div>
         <div id="confidenceDisplay" style="display:none;"></div>
       </div>
       <div id="controls">
@@ -185,6 +246,15 @@
       <div id="log"></div>
     </div>
   </div>
+  <!-- Winner modal overlay shown at the end of each hand -->
+  <div id="winnerModal">
+    <div class="modal-content">
+      <h2>Hand Complete</h2>
+      <p id="winnerText"></p>
+      <button id="nextHandBtn">Next Hand</button>
+    </div>
+  </div>
+
   <script>
   // --- Card helpers ---
   const suits = ['S','H','D','C'];
@@ -351,28 +421,82 @@
     return 0;
   }
 
-  // --- Bot logic ---
-  function getBotConfidence(botCards, community) {
-    if (community.length === 0) {
-      const r1 = botCards[0].rank;
-      const r2 = botCards[1].rank;
-      if (r1 === r2) return 0.75;
-      if (r1 >= 11 && r2 >= 11) return 0.65;
-      if (Math.abs(r1 - r2) <= 2) return 0.45;
-      return 0.35;
+  // --- Hand confidence calculation ---
+  /**
+   * Compute a confidence value between 0 and 1 for a set of hole cards at a given stage of the game.
+   *
+   * Confidence aims to approximate how strong a hand currently is relative to the best possible
+   * poker hands. During the pre-flop stage (no community cards), we use a simple starting
+   * hand heuristic that accounts for pairs, high cards, suitedness and gaps. Once community
+   * cards are on the board, we evaluate the actual five‑card hand and map the ranking
+   * to a baseline confidence. We then slightly reduce that baseline when cards remain to be dealt
+   * (flop and turn stages), acknowledging that draws can still improve or harm the hand.
+   *
+   * @param {Array} holeCards Two card objects representing the player's hole cards.
+   * @param {Array} communityCards Array of community card objects (0–5 cards).
+   * @returns {number} A value between 0 and 1 representing the confidence in the current hand.
+   */
+  function getBotConfidence(holeCards, communityCards) {
+    // Pre‑flop heuristic: evaluate the relative strength of the two hole cards.
+    if (communityCards.length === 0) {
+      const [c1, c2] = holeCards;
+      const r1 = c1.rank;
+      const r2 = c2.rank;
+      const high = Math.max(r1, r2);
+      const low = Math.min(r1, r2);
+      const suited = c1.suit === c2.suit;
+      const gap = high - low - 1; // number of ranks between the two cards
+      // Pair hands: give a big boost, scaled by rank
+      if (r1 === r2) {
+        if (r1 >= 13) return 0.85; // AA or KK
+        if (r1 >= 11) return 0.80; // QQ, JJ
+        if (r1 >= 9) return 0.75;  // TT, 99
+        return 0.70;               // other pairs
+      }
+      // Premium non-pair hands
+      if (suited && high >= 13 && low >= 11) return 0.78; // AKs, AQs, KQs
+      if (!suited && high >= 13 && low >= 11) return 0.72; // AK, AQ, KQ off-suit
+      // High suited connectors (JT suited or better)
+      if (suited && high >= 11 && gap === 0) return 0.68; // JTs, QJs, KQs
+      // Suited aces (Ax suited where x >= 9)
+      if (suited && r1 === 14) {
+        if (r2 >= 10) return 0.66;
+        return 0.60;
+      }
+      // Medium suited connectors/gappers (e.g. 9T, 8T suited)
+      if (suited && gap <= 2 && high >= 8) return 0.58;
+      // High off‑suit connectors
+      if (!suited && gap === 0 && high >= 11) return 0.60;
+      // Suited medium cards
+      if (suited && high >= 9) return 0.52;
+      // Default weak hand
+      return 0.40;
     }
-    const hand = evaluateHand(botCards.concat(community));
-    switch (hand.value) {
-      case 8: return 0.98;
-      case 7: return 0.95;
-      case 6: return 0.90;
-      case 5: return 0.82;
-      case 4: return 0.78;
-      case 3: return 0.68;
-      case 2: return 0.58;
-      case 1: return 0.45;
-      default: return 0.30;
+    // Post‑flop and later: evaluate the made hand and map its rank to a baseline confidence.
+    const evalResult = evaluateHand(holeCards.concat(communityCards));
+    // Map the hand value (0–8) to a baseline confidence.
+    const baseMap = {
+      0: 0.40, // High card
+      1: 0.55, // One Pair
+      2: 0.65, // Two Pair
+      3: 0.75, // Three of a Kind
+      4: 0.80, // Straight
+      5: 0.87, // Flush
+      6: 0.93, // Full House
+      7: 0.96, // Four of a Kind
+      8: 0.99  // Straight Flush
+    };
+    let conf = baseMap[evalResult.value] ?? 0.40;
+    // If fewer than five community cards are on the table (flop/turn), slightly reduce the
+    // confidence to account for future cards that could change the hand strength.
+    const missing = 5 - communityCards.length;
+    if (missing > 0) {
+      conf -= missing * 0.03;
     }
+    // Clamp to sensible bounds
+    if (conf < 0.05) conf = 0.05;
+    if (conf > 0.99) conf = 0.99;
+    return conf;
   }
 
   // --- Game state and logic ---
@@ -482,8 +606,36 @@
     // Compute the confidence using the same function as for bots
     const conf = getBotConfidence(playerCards, community);
     const percent = Math.round(conf * 100);
-    confDiv.textContent = `Hand confidence: ${percent}%`;
+    confDiv.textContent = `Confidence: ${percent}%`;
     confDiv.style.display = 'block';
+  }
+
+  // Display the player's current hand rank (High Card, Pair, etc.) and starting hand description.
+  function renderHandRank() {
+    const rankDiv = document.getElementById('handRankDisplay');
+    // Hide if element doesn't exist or no cards dealt yet
+    if (!rankDiv) return;
+    if (playerCards.length === 0) {
+      rankDiv.style.display = 'none';
+      rankDiv.textContent = '';
+      return;
+    }
+    // Before any community cards, show the starting hand description with suits
+    if (community.length === 0) {
+      const [c1, c2] = playerCards;
+      const r1 = rankNames[c1.rank];
+      const r2 = rankNames[c2.rank];
+      const sym1 = suitSymbol(c1.suit);
+      const sym2 = suitSymbol(c2.suit);
+      const suitedFlag = c1.suit === c2.suit;
+      rankDiv.textContent = `${r1}${sym1} & ${r2}${sym2}${suitedFlag ? ' (suited)' : ''}`;
+      rankDiv.style.display = 'block';
+      return;
+    }
+    // With community cards, evaluate the best hand and display its name
+    const evaluation = evaluateHand(playerCards.concat(community));
+    rankDiv.textContent = evaluation.name;
+    rankDiv.style.display = 'block';
   }
 
   function updateUI() {
@@ -491,11 +643,14 @@
     renderBots(false);
     renderCommunity();
     renderPlayerCards();
+    renderHandRank();
     renderConfidence();
   }
 
   // Reset players for a new hand
   function resetForNewHand() {
+    // Clear log so that history only shows messages from the current hand
+    logElem.innerHTML = '';
     botPlayers.forEach(bot => {
       bot.cards = [];
       bot.folded = false;
@@ -512,6 +667,25 @@
     pot = 0;
     stage = 'Pre-Flop';
     addLog('--- New Hand ---');
+  }
+
+  // Display a modal with the winner(s) and wait for the user to proceed to the next hand.
+  // The provided message can contain newline characters, which are converted to line breaks.
+  function showWinnerPopup(message) {
+    return new Promise(resolve => {
+      const modal = document.getElementById('winnerModal');
+      const textElem = document.getElementById('winnerText');
+      const button = document.getElementById('nextHandBtn');
+      // Convert newline characters to <br> for display
+      textElem.innerHTML = message.replace(/\n/g, '<br>');
+      modal.style.display = 'flex';
+      const handler = () => {
+        modal.style.display = 'none';
+        button.removeEventListener('click', handler);
+        resolve();
+      };
+      button.addEventListener('click', handler);
+    });
   }
 
   // Ante collection
@@ -698,14 +872,18 @@
       if (result === 'PlayerFold') {
         // Bots share pot
         const remaining = activeBots();
+        let popupMsg = '';
         if (remaining.length > 0) {
           const winner = remaining[Math.floor(Math.random()*remaining.length)];
           winner.chips += pot;
           winner.lastAction = `Won ${pot}`;
           addLog(`${winner.name} wins ${pot} chips.`);
+          popupMsg = `${winner.name} wins ${pot} chips.`;
+        } else {
+          popupMsg = 'Hand over.';
         }
         updateUI();
-        alert('Press OK for next hand');
+        await showWinnerPopup(popupMsg);
         return;
       }
       if (result === 'BotsFold') {
@@ -713,7 +891,7 @@
         playerChips += pot;
         addLog(`All bots folded. You win ${pot} chips.`);
         updateUI();
-        alert('Press OK for next hand');
+        await showWinnerPopup(`All bots folded. You win ${pot} chips.`);
         return;
       }
     }
@@ -737,6 +915,8 @@
     const winners = contenders.filter(c => compareHands(c.eval, best.eval) === 0);
     let share = Math.floor(pot / winners.length);
     let remainder = pot - share * winners.length;
+    // Accumulate messages for the popup
+    const popupMessages = [];
     winners.forEach(w => {
       let amount = share;
       if (remainder > 0) { amount++; remainder--; }
@@ -746,10 +926,12 @@
         w.ref.chips += amount;
         w.ref.lastAction = `Won ${amount}`;
       }
-      addLog(`${w.name} wins ${amount} chips.`);
+      const msg = `${w.name} wins ${amount} chips.`;
+      addLog(msg);
+      popupMessages.push(msg);
     });
     updateUI();
-    alert('Press OK for next hand');
+    await showWinnerPopup(popupMessages.join('\n'));
   }
 
   function gameOver() {
