@@ -132,6 +132,18 @@
     .bot-name {
       font-weight: bold;
     }
+
+    /* Hand confidence display */
+    #confidenceDisplay {
+      margin-top: 6px;
+      padding: 6px 10px;
+      background-color: #0f3413;
+      border-radius: 4px;
+      color: #ffd700;
+      font-weight: bold;
+      text-align: center;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
   </style>
 </head>
 <body>
@@ -141,6 +153,12 @@
       <p>
         <label>Number of bots (1–5):
           <input type="number" id="botCount" min="1" max="5" value="2"/>
+        </label>
+      </p>
+      <p>
+        <label>
+          <input type="checkbox" id="showConf" />
+          Show hand confidence while playing
         </label>
       </p>
       <p>
@@ -157,6 +175,7 @@
       <div>
         <h3>Your Hand</h3>
         <div id="playerCards" class="cards"></div>
+        <div id="confidenceDisplay" style="display:none;"></div>
       </div>
       <div id="controls">
         <button id="checkBtn">Check</button>
@@ -380,6 +399,7 @@
   let pot = 0;
   let stage = '';
   // Bots now have individual aggressiveness values (0.0–1.0). There is no global aggressiveness.
+  let showConfidence = false; // whether to display hand confidence to the user
 
   const botNamePool = ['Amelia','Marcus','Sophia','Elias','Nora','Victor','Maya','Jonas','Clara','Dante','Iris','Theo','Elena','Caleb','Rhea'];
 
@@ -452,11 +472,26 @@
     playerCards.forEach(c => area.appendChild(cardElement(c)));
   }
 
+  // Display the player's current hand confidence, if enabled
+  function renderConfidence() {
+    const confDiv = document.getElementById('confidenceDisplay');
+    if (!showConfidence) {
+      confDiv.style.display = 'none';
+      return;
+    }
+    // Compute the confidence using the same function as for bots
+    const conf = getBotConfidence(playerCards, community);
+    const percent = Math.round(conf * 100);
+    confDiv.textContent = `Hand confidence: ${percent}%`;
+    confDiv.style.display = 'block';
+  }
+
   function updateUI() {
     renderInfo();
     renderBots(false);
     renderCommunity();
     renderPlayerCards();
+    renderConfidence();
   }
 
   // Reset players for a new hand
@@ -736,6 +771,8 @@
     if (!count || count < 1) count = 1;
     if (count > 5) count = 5;
     // Initialize player and bots
+    const confCheckbox = document.getElementById('showConf');
+    showConfidence = confCheckbox && confCheckbox.checked;
     playerChips = 2000;
     botPlayers = createBots(count);
     document.getElementById('setup').style.display = 'none';
