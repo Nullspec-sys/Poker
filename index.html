@@ -936,6 +936,92 @@
     return botPlayers.filter(bot => !bot.out && !bot.folded);
   }
 
+  // When the player folds, we still play out the remainder of the hand so that
+  // the remaining bots finish the round. This helper reveals any remaining
+  // community cards, evaluates each active bot's hand, splits the pot
+  // appropriately among the winners, updates the UI and log, and shows the
+  // winner popup. It mirrors the showdown logic but skips the player's
+  // involvement because they have folded.
+  /**
+   * When the player folds we still want to watch the rest of the hand play out.
+   * This helper deals the remaining community cards one stage at a time,
+   * shows simple bot actions (all bots check through the remaining streets),
+   * updates the UI between each stage, and finally performs a showdown
+   * amongst the remaining bots.  This avoids abruptly ending the hand
+   * immediately after a fold, giving the player a sense of how the round
+   * would have unfolded.
+   */
+  async function finishFoldHand() {
+    // Define the order of the stages for reference
+    const stages = ['Pre-Flop','Flop','Turn','River'];
+    // Find the current stage index so we know where to resume
+    let currentIndex = stages.indexOf(stage);
+    if (currentIndex < 0) currentIndex = 0;
+    // Play out the remaining streets. We skip the current stage because it
+    // already completed its betting round when the fold occurred.
+    for (let i = currentIndex + 1; i < stages.length; i++) {
+      stage = stages[i];
+      // Deal community cards depending on the stage
+      if (stage === 'Flop') {
+        community.push(drawCard(deck));
+        community.push(drawCard(deck));
+        community.push(drawCard(deck));
+        addLog('The flop is dealt.');
+      } else {
+        community.push(drawCard(deck));
+        addLog(`The ${stage.toLowerCase()} is dealt.`);
+      }
+      updateUI();
+      // Simulate that the remaining bots check this street. We don't
+      // implement a full betting tree here to keep the logic manageable
+      // after a fold. Bots simply check and we animate their actions.
+      for (const bot of activeBots()) {
+        // Only show actions for bots who are still in the pot
+        bot.lastAction = 'Checked';
+        addLog(`${bot.name} checks.`);
+        await showActionToast(`${bot.name} checks`, bot.name);
+      }
+      clearActivePlayer();
+      // Wait briefly between streets to pace the reveals
+      await sleep(randomInt(600, 1000));
+    }
+    // Once all community cards are dealt, determine the winner(s) among bots.
+    // Gather active bots (those not folded or out)
+    const contenders = [];
+    activeBots().forEach(bot => {
+      const h = evaluateHand(bot.cards.concat(community));
+      contenders.push({name: bot.name, eval: h, ref: bot});
+      bot.lastAction = h.name;
+      addLog(`${bot.name} has ${h.name}.`);
+    });
+    // If no contenders remain (all bots folded), just show that the hand is over
+    if (contenders.length === 0) {
+      updateUI();
+      await showWinnerPopup('Hand over.');
+      return;
+    }
+    // Determine the best hand among the bots
+    let best = contenders[0];
+    for (let i = 1; i < contenders.length; i++) {
+      if (compareHands(contenders[i].eval, best.eval) > 0) best = contenders[i];
+    }
+    const winners = contenders.filter(c => compareHands(c.eval, best.eval) === 0);
+    let share = Math.floor(pot / winners.length);
+    let remainder = pot - share * winners.length;
+    const popupMessages = [];
+    winners.forEach(w => {
+      let amount = share;
+      if (remainder > 0) { amount++; remainder--; }
+      w.ref.chips += amount;
+      w.ref.lastAction = `Won ${amount}`;
+      const msg = `${w.name} wins ${amount} chips.`;
+      addLog(msg);
+      popupMessages.push(msg);
+    });
+    updateUI();
+    await showWinnerPopup(popupMessages.join('\n'));
+  }
+
   // Resolve bot calls after a bet, one bot at a time so the table feels turn-based.
   async function resolveBotCalls(betAmount, betterName) {
     for (const bot of activeBots()) {
@@ -1015,6 +1101,7 @@
     await showActionToast('You check', 'You');
 
     let highestBotBet = 0;
+    let betBotName = null;
     for (const bot of activeBots()) {
       await showBotThinking(bot);
       const conf = getBotConfidence(bot.cards, community);
@@ -1026,7 +1113,9 @@
         const bet = Math.min(25, bot.chips);
         bot.chips -= bet;
         pot += bet;
+        // Track the bot that placed the bet so we can reference them later
         highestBotBet = Math.max(highestBotBet, bet);
+        betBotName = bot.name;
         bot.lastAction = `Bet ${bet}`;
         addLog(`${bot.name} bets ${bet}.`);
         await showActionToast(`${bot.name} bets ${bet}`, bot.name);
@@ -1042,7 +1131,8 @@
       updateUI();
       const call = await showDecisionModal({
         title: 'Call or Fold?',
-        message: `A bot bet ${highestBotBet}. Call ${highestBotBet} to stay in the hand?`,
+        // Tell the player which bot placed the bet rather than using a generic message
+        message: `${(betBotName || 'A bot')} bet ${highestBotBet}. Call ${highestBotBet} to stay in the hand?`,
         buttons: [
           {label:`Call ${highestBotBet}`, value:'call'},
           {label:'Fold', value:'fold', kind:'danger'}
@@ -1091,20 +1181,8 @@
       updateUI();
       const result = await bettingRound();
       if (result === 'PlayerFold') {
-        // Bots share pot
-        const remaining = activeBots();
-        let popupMsg = '';
-        if (remaining.length > 0) {
-          const winner = remaining[Math.floor(Math.random()*remaining.length)];
-          winner.chips += pot;
-          winner.lastAction = `Won ${pot}`;
-          addLog(`${winner.name} wins ${pot} chips.`);
-          popupMsg = `${winner.name} wins ${pot} chips.`;
-        } else {
-          popupMsg = 'Hand over.';
-        }
-        updateUI();
-        await showWinnerPopup(popupMsg);
+        // The player folded; continue playing the hand out to reveal the outcome
+        await finishFoldHand();
         return;
       }
       if (result === 'BotsFold') {
