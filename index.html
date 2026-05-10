@@ -159,6 +159,114 @@
       display: none;
     }
 
+
+
+    /* Active turn highlighting */
+    .bot-item.active-turn,
+    #playerArea.active-turn {
+      outline: 2px solid #ffd700;
+      box-shadow: 0 0 16px rgba(255, 215, 0, 0.55), inset 0 0 12px rgba(255, 215, 0, 0.12);
+      background: linear-gradient(90deg, rgba(255,215,0,0.16), rgba(21,73,28,0.95));
+      transform: translateY(-1px);
+    }
+    #playerArea {
+      border-radius: 10px;
+      padding: 8px;
+      transition: box-shadow .2s ease, outline .2s ease, background .2s ease;
+    }
+
+    /* Small organic action popup used while turns cycle */
+    #actionToast {
+      position: fixed;
+      left: 50%;
+      top: 18px;
+      transform: translateX(-50%) translateY(-12px);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 900;
+      min-width: 230px;
+      max-width: 420px;
+      padding: 13px 18px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 20%, rgba(255,255,255,0.14), transparent 30%), rgba(8, 35, 15, 0.96);
+      border: 1px solid rgba(255, 215, 0, 0.45);
+      color: #fff4bf;
+      text-align: center;
+      font-weight: 800;
+      letter-spacing: .3px;
+      box-shadow: 0 14px 35px rgba(0,0,0,.45), 0 0 22px rgba(255,215,0,.16);
+      transition: opacity .22s ease, transform .22s ease;
+    }
+    #actionToast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* Organic decision modal to replace browser confirm/prompt popups */
+    #decisionModal {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1100;
+      backdrop-filter: blur(2px);
+    }
+    #decisionModal .decision-card {
+      width: min(420px, calc(100vw - 36px));
+      padding: 22px;
+      border-radius: 18px;
+      background: linear-gradient(145deg, #123b19, #071f0d 70%);
+      border: 1px solid rgba(255,215,0,.38);
+      box-shadow: 0 24px 65px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08);
+      color: #f2f6e9;
+      text-align: center;
+    }
+    #decisionModal h2 {
+      margin: 0 0 8px 0;
+      color: #ffd700;
+      font-size: 1.25rem;
+    }
+    #decisionModal p {
+      margin: 0 0 16px 0;
+      line-height: 1.45;
+    }
+    #decisionModal input {
+      width: calc(100% - 24px);
+      margin-bottom: 14px;
+      padding: 11px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.2);
+      background: rgba(0,0,0,.25);
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+    }
+    .decision-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .decision-actions button,
+    #startBtn {
+      border: none;
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-weight: 800;
+      cursor: pointer;
+      color: #fff;
+      background: #1e88e5;
+      box-shadow: 0 2px 8px rgba(0,0,0,.35);
+    }
+    .decision-actions button.secondary {
+      background: #5a5a5a;
+    }
+    .decision-actions button.danger {
+      background: #d73b34;
+    }
+
     /* Winner modal overlay */
     #winnerModal {
       position: fixed;
@@ -232,7 +340,7 @@
         <h3>Community Cards</h3>
         <div id="communityCards" class="cards"></div>
       </div>
-      <div>
+      <div id="playerArea">
         <h3>Your Hand</h3>
         <div id="playerCards" class="cards"></div>
         <div id="handRankDisplay"></div>
@@ -246,6 +354,17 @@
       <div id="log"></div>
     </div>
   </div>
+
+  <div id="actionToast"></div>
+  <div id="decisionModal">
+    <div class="decision-card">
+      <h2 id="decisionTitle">Decision</h2>
+      <p id="decisionMessage"></p>
+      <input id="decisionInput" type="number" min="1" style="display:none;" />
+      <div id="decisionActions" class="decision-actions"></div>
+    </div>
+  </div>
+
   <!-- Winner modal overlay shown at the end of each hand -->
   <div id="winnerModal">
     <div class="modal-content">
@@ -524,6 +643,7 @@
   let stage = '';
   // Bots now have individual aggressiveness values (0.0–1.0). There is no global aggressiveness.
   let showConfidence = false; // whether to display hand confidence to the user
+  let activePlayerName = null; // highlights whose turn/action is currently being shown
 
   const botNamePool = ['Amelia','Marcus','Sophia','Elias','Nora','Victor','Maya','Jonas','Clara','Dante','Iris','Theo','Elena','Caleb','Rhea'];
 
@@ -560,7 +680,7 @@
     botPlayers.forEach(bot => {
       const status = bot.out ? 'OUT' : (bot.folded ? 'FOLDED' : 'ACTIVE');
       const div = document.createElement('div');
-      div.className = 'bot-item';
+      div.className = 'bot-item' + (activePlayerName === bot.name ? ' active-turn' : '');
       // Build inner HTML with icons and emphasis
       div.innerHTML = `<span class="bot-name">${bot.name}</span> — 💰 ${bot.chips} — <em>${status}</em> — ${bot.lastAction}`;
       panel.appendChild(div);
@@ -645,6 +765,102 @@
     renderPlayerCards();
     renderHandRank();
     renderConfidence();
+    const playerArea = document.getElementById('playerArea');
+    if (playerArea) playerArea.classList.toggle('active-turn', activePlayerName === 'You');
+  }
+
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function randomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  async function showBotThinking(bot) {
+    activePlayerName = bot.name;
+    updateUI();
+    const toast = document.getElementById('actionToast');
+    const thinkingLines = [
+      `${bot.name} studies the table...`,
+      `${bot.name} weighs the pot...`,
+      `${bot.name} thinks it over...`,
+      `${bot.name} watches the board...`
+    ];
+    toast.textContent = thinkingLines[randomInt(0, thinkingLines.length - 1)];
+    toast.classList.add('show', 'thinking');
+    await sleep(randomInt(850, 1550));
+    toast.classList.remove('thinking');
+  }
+
+  async function showActionToast(message, actorName=null, duration=null) {
+    activePlayerName = actorName;
+    updateUI();
+    const toast = document.getElementById('actionToast');
+    toast.textContent = message;
+    toast.classList.add('show');
+    await sleep(duration ?? randomInt(950, 1400));
+    toast.classList.remove('show');
+    await sleep(randomInt(220, 420));
+  }
+
+  function clearActivePlayer() {
+    activePlayerName = null;
+    updateUI();
+  }
+
+  function showDecisionModal({title, message, buttons, input=false, placeholder=''}) {
+    return new Promise(resolve => {
+      const modal = document.getElementById('decisionModal');
+      const titleElem = document.getElementById('decisionTitle');
+      const messageElem = document.getElementById('decisionMessage');
+      const inputElem = document.getElementById('decisionInput');
+      const actions = document.getElementById('decisionActions');
+      titleElem.textContent = title;
+      messageElem.textContent = message;
+      actions.innerHTML = '';
+      inputElem.value = '';
+      inputElem.placeholder = placeholder;
+      inputElem.style.display = input ? 'block' : 'none';
+      buttons.forEach(btn => {
+        const b = document.createElement('button');
+        b.textContent = btn.label;
+        if (btn.kind) b.className = btn.kind;
+        b.addEventListener('click', () => {
+          modal.style.display = 'none';
+          resolve(input ? {action: btn.value, value: inputElem.value} : btn.value);
+        });
+        actions.appendChild(b);
+      });
+      modal.style.display = 'flex';
+      if (input) setTimeout(() => inputElem.focus(), 50);
+    });
+  }
+
+  function waitForPlayerChoice() {
+    return new Promise(resolve => {
+      const checkBtn = document.getElementById('checkBtn');
+      const betBtn = document.getElementById('betBtn');
+      const foldBtn = document.getElementById('foldBtn');
+      checkBtn.disabled = false;
+      betBtn.disabled = false;
+      foldBtn.disabled = false;
+      function disable() {
+        checkBtn.disabled = true;
+        betBtn.disabled = true;
+        foldBtn.disabled = true;
+      }
+      checkBtn.onclick = () => { disable(); resolve({action:'check'}); };
+      betBtn.onclick = () => { disable(); resolve({action:'bet'}); };
+      foldBtn.onclick = () => { disable(); resolve({action:'fold'}); };
+    });
+  }
+
+  function disableControls() {
+    document.getElementById('checkBtn').disabled = true;
+    document.getElementById('betBtn').disabled = true;
+    document.getElementById('foldBtn').disabled = true;
   }
 
   // Reset players for a new hand
@@ -720,20 +936,21 @@
     return botPlayers.filter(bot => !bot.out && !bot.folded);
   }
 
-  // Resolve bot calls after player bet
-  function resolveBotCalls(betAmount, betterName) {
-    activeBots().forEach(bot => {
-      if (bot.name === betterName) return;
+  // Resolve bot calls after a bet, one bot at a time so the table feels turn-based.
+  async function resolveBotCalls(betAmount, betterName) {
+    for (const bot of activeBots()) {
+      if (bot.name === betterName) continue;
+      await showBotThinking(bot);
       const conf = getBotConfidence(bot.cards, community);
       let callChance = conf + 0.20 - (betAmount / 220);
-      // adjust by the bot's individual aggressiveness
       callChance += ((bot.agg - 0.5) * 0.3);
       if (callChance < 0) callChance = 0;
       if (callChance > 1) callChance = 1;
       if (bot.chips <= 0) {
         bot.folded = true;
         bot.lastAction = 'Out of chips';
-        return;
+        await showActionToast(`${bot.name} is out of chips`, bot.name);
+        continue;
       }
       const callAmount = Math.min(betAmount, bot.chips);
       if (Math.random() < callChance) {
@@ -741,109 +958,112 @@
         pot += callAmount;
         bot.lastAction = `Called ${callAmount}`;
         addLog(`${bot.name} calls ${callAmount}.`);
+        await showActionToast(`${bot.name} calls ${callAmount}`, bot.name);
       } else {
         bot.folded = true;
         bot.lastAction = 'Folded';
         addLog(`${bot.name} folds.`);
+        await showActionToast(`${bot.name} folds`, bot.name);
       }
-    });
+    }
+    clearActivePlayer();
   }
 
   // Betting round: returns 'PlayerFold','BotsFold','Continue' depending on outcome
   async function bettingRound() {
-    // Reset bot lastAction waiting for the stage
     botPlayers.forEach(bot => {
       if (!bot.out && !bot.folded) bot.lastAction = 'Waiting';
     });
+    activePlayerName = 'You';
     updateUI();
-    return new Promise(resolve => {
-      // Enable controls
-      const checkBtn = document.getElementById('checkBtn');
-      const betBtn = document.getElementById('betBtn');
-      const foldBtn = document.getElementById('foldBtn');
-      checkBtn.disabled = false;
-      betBtn.disabled = false;
-      foldBtn.disabled = false;
-      function disable() {
-        checkBtn.disabled = true;
-        betBtn.disabled = true;
-        foldBtn.disabled = true;
+
+    const choice = await waitForPlayerChoice();
+
+    if (choice.action === 'fold') {
+      addLog('You fold.');
+      await showActionToast('You fold', 'You');
+      clearActivePlayer();
+      return 'PlayerFold';
+    }
+
+    if (choice.action === 'bet') {
+      const decision = await showDecisionModal({
+        title: 'Place a Bet',
+        message: `You have ${playerChips} chips. How much do you want to bet?`,
+        input: true,
+        placeholder: 'Bet amount',
+        buttons: [
+          {label:'Bet', value:'bet'},
+          {label:'Cancel', value:'cancel', kind:'secondary'}
+        ]
+      });
+      let amt = parseInt(decision.value, 10);
+      if (decision.action !== 'bet' || !amt || amt <= 0 || amt > playerChips) {
+        addLog('Invalid bet entered. You check instead.');
+        await showActionToast('Invalid bet — treated as check', 'You');
+        return 'Continue';
       }
-      checkBtn.onclick = () => {
-        disable();
-        addLog('You check.');
-        // Bots may bet when you check
-        let someoneBet = false;
-        activeBots().forEach(bot => {
-          const conf = getBotConfidence(bot.cards, community);
-          let betChance = conf - 0.25;
-          // Adjust betChance by the bot's aggressiveness
-          betChance += ((bot.agg - 0.5) * 0.3);
-          if (betChance < 0) betChance = 0;
-          if (betChance > 1) betChance = 1;
-          if (Math.random() < betChance) {
-            const bet = Math.min(25, bot.chips);
-            bot.chips -= bet;
-            pot += bet;
-            bot.lastAction = `Bet ${bet}`;
-            addLog(`${bot.name} bets ${bet}.`);
-            someoneBet = true;
-          } else {
-            bot.lastAction = 'Checked';
-            addLog(`${bot.name} checks.`);
-          }
-        });
-        updateUI();
-        if (someoneBet) {
-          // Ask player to call or fold
-          const lastBet = 25;
-          // Prompt using confirm-like call: we can implement quick prompt using browser confirm but we want consistent UI
-          setTimeout(() => {
-            const call = confirm(`Call ${lastBet} to stay in the hand?`);
-            if (call && playerChips >= lastBet) {
-              playerChips -= lastBet;
-              pot += lastBet;
-              addLog(`You call ${lastBet}.`);
-              resolveBotCalls(lastBet, null);
-              if (activeBots().length === 0) {
-                resolve('BotsFold');
-              } else {
-                resolve('Continue');
-              }
-            } else {
-              addLog('You fold.');
-              resolve('PlayerFold');
-            }
-          }, 50);
-        } else {
-          resolve('Continue');
-        }
-      };
-      betBtn.onclick = () => {
-        disable();
-        let amtStr = prompt('Enter your bet amount:');
-        let amt = parseInt(amtStr,10);
-        if (!amt || amt <= 0 || amt > playerChips) {
-          addLog('Invalid bet entered.');
-          resolve('Continue');
-          return;
-        }
-        playerChips -= amt;
-        pot += amt;
-        addLog(`You bet ${amt}.`);
-        resolveBotCalls(amt, 'You');
-        if (activeBots().length === 0) {
-          resolve('BotsFold');
-        } else {
-          resolve('Continue');
-        }
-      };
-      foldBtn.onclick = () => {
-        disable();
-        addLog('You fold.');
-        resolve('PlayerFold');
-      };
-    });
+      playerChips -= amt;
+      pot += amt;
+      addLog(`You bet ${amt}.`);
+      await showActionToast(`You bet ${amt}`, 'You');
+      await resolveBotCalls(amt, 'You');
+      return activeBots().length === 0 ? 'BotsFold' : 'Continue';
+    }
+
+    addLog('You check.');
+    await showActionToast('You check', 'You');
+
+    let highestBotBet = 0;
+    for (const bot of activeBots()) {
+      await showBotThinking(bot);
+      const conf = getBotConfidence(bot.cards, community);
+      let betChance = conf - 0.25;
+      betChance += ((bot.agg - 0.5) * 0.3);
+      if (betChance < 0) betChance = 0;
+      if (betChance > 1) betChance = 1;
+      if (Math.random() < betChance && bot.chips > 0) {
+        const bet = Math.min(25, bot.chips);
+        bot.chips -= bet;
+        pot += bet;
+        highestBotBet = Math.max(highestBotBet, bet);
+        bot.lastAction = `Bet ${bet}`;
+        addLog(`${bot.name} bets ${bet}.`);
+        await showActionToast(`${bot.name} bets ${bet}`, bot.name);
+      } else {
+        bot.lastAction = 'Checked';
+        addLog(`${bot.name} checks.`);
+        await showActionToast(`${bot.name} checks`, bot.name);
+      }
+    }
+
+    if (highestBotBet > 0) {
+      activePlayerName = 'You';
+      updateUI();
+      const call = await showDecisionModal({
+        title: 'Call or Fold?',
+        message: `A bot bet ${highestBotBet}. Call ${highestBotBet} to stay in the hand?`,
+        buttons: [
+          {label:`Call ${highestBotBet}`, value:'call'},
+          {label:'Fold', value:'fold', kind:'danger'}
+        ]
+      });
+      if (call === 'call' && playerChips >= highestBotBet) {
+        playerChips -= highestBotBet;
+        pot += highestBotBet;
+        addLog(`You call ${highestBotBet}.`);
+        await showActionToast(`You call ${highestBotBet}`, 'You');
+        await resolveBotCalls(highestBotBet, null);
+        return activeBots().length === 0 ? 'BotsFold' : 'Continue';
+      }
+      addLog('You fold.');
+      await showActionToast('You fold', 'You');
+      clearActivePlayer();
+      return 'PlayerFold';
+    }
+
+    clearActivePlayer();
+    return 'Continue';
   }
 
   async function playHand() {
@@ -851,6 +1071,7 @@
     dealCards();
     anteCollect();
     updateUI();
+    disableControls();
     // Stages: Pre-Flop, Flop, Turn, River
     const stages = ['Pre-Flop','Flop','Turn','River'];
     for (let i=0; i<stages.length; i++) {
