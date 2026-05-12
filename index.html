@@ -790,7 +790,7 @@
     ];
     toast.textContent = thinkingLines[randomInt(0, thinkingLines.length - 1)];
     toast.classList.add('show', 'thinking');
-    await sleep(randomInt(500, 1000));
+    await sleep(randomInt(250, 750));
     toast.classList.remove('thinking');
   }
 
