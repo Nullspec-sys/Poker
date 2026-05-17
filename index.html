@@ -652,20 +652,27 @@
         --card-w: clamp(38px, 16.4vw, 56px);
         grid-template-areas:
           "info"
+          "bots"
           "board"
           "player"
-          "controls"
-          "bots";
+          "controls";
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto auto minmax(86px, 24dvh);
+        grid-template-rows: auto minmax(88px, 23dvh) auto auto auto;
         gap: 6px;
       }
       #infoBar { font-size: .82rem; padding: 6px 8px; }
-      #botPanel { grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); }
+      #botPanel {
+        grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+        overflow-y: auto;
+        max-height: 23dvh;
+        min-height: 88px;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+      }
       #controls { position: sticky; bottom: 4px; z-index: 25; padding: 4px; background: rgba(4,24,10,.72); border-radius: 999px; backdrop-filter: blur(4px); }
       #controls button { min-height: 40px; flex-basis: 30%; padding: 8px 6px; }
-      #game.compact-bots { grid-template-rows: auto auto auto auto auto; }
-      #game.compact-bots #botPanel { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }
+      #game.compact-bots { grid-template-rows: auto minmax(92px, 24dvh) auto auto auto; }
+      #game.compact-bots #botPanel { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); max-height: 24dvh; }
       #game.compact-bots .bot-line { font-size: .62rem; }
       #game.compact-bots .bot-card-row .card { width: 22px; height: 31px; min-width: 22px; }
       #actionToast { top: 8px; min-width: 0; width: min(92vw, 390px); padding: 10px 14px; font-size: .92rem; }
