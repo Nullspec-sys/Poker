@@ -1793,12 +1793,18 @@
   }
 
   function bettingComplete() {
+    const contenders = activeContenderSeats();
     const actionables = actionableSeats();
-    if (activeContenderSeats().length <= 1) return true;
-    if (actionables.length <= 1 && currentBet > 0) {
-      return actionables.every(i => getSeatCommitted(i) >= currentBet);
-    }
-    return actionables.every(i => seatActed(i) && getSeatCommitted(i) === currentBet);
+
+    // If everyone but one player folded, the betting round and hand are done.
+    if (contenders.length <= 1) return true;
+
+    // If nobody can act anymore because the remaining players are all-in, continue to next street/showdown.
+    if (actionables.length === 0) return true;
+
+    // A betting round is complete only when every non-folded, non-all-in player
+    // has acted and has matched the current bet.
+    return actionables.every(i => seatActed(i) && getSeatCommitted(i) >= currentBet);
   }
 
   function chooseBotBetSize(bot) {
@@ -1839,22 +1845,37 @@
     const raiseTendency = bot.raiseTendency ?? 0.35;
     const bluff = bot.bluffRate ?? 0.05;
     const stack = Math.max(1, bot.chips + bot.committed);
-    const pressure = Math.min(0.24, toCall / Math.max(120, stack));
-    const streetBonus = community.length === 0 ? 0.00 : (community.length >= 4 ? 0.035 : 0.02);
+    const pressure = Math.min(0.26, toCall / Math.max(120, stack));
+    const streetBonus = community.length === 0 ? 0.00 : (community.length >= 4 ? 0.03 : 0.02);
     const personalityBoost = ((aggression - 0.5) * 0.12) + ((raiseTendency - 0.35) * 0.16);
-    const threshold = 0.61 - personalityBoost - streetBonus;
-    const valueChance = Math.max(0, Math.min(0.55, (effective - pressure - threshold) * 2.4 + raiseTendency * 0.14));
-    const pressureRaise = Math.random() < Math.max(0.01, bluff * aggression * raiseTendency * 0.65);
-    return Math.random() < valueChance || pressureRaise;
+
+    // Do not allow random raise spam with weak confidence. Bluffs can happen,
+    // but only from bots whose personality supports it.
+    const threshold = 0.62 - personalityBoost - streetBonus;
+    const valueRaiseChance = Math.max(0, Math.min(0.48, (effective - pressure - threshold) * 2.2 + raiseTendency * 0.10));
+    const bluffRaiseChance = effective > 0.42 ? Math.max(0.005, bluff * aggression * raiseTendency * 0.45) : 0;
+
+    return Math.random() < valueRaiseChance || Math.random() < bluffRaiseChance;
   }
 
   function botShouldCall(bot, toCall) {
     const effective = botEffectiveConfidence(bot);
     const aggression = bot.agg ?? 0.5;
-    const potOddsBoost = Math.min(0.20, (pot / Math.max(1, pot + toCall)) * 0.22);
-    const pricePenalty = Math.min(0.34, toCall / Math.max(70, bot.chips + bot.committed));
-    const threshold = 0.42 + pricePenalty - potOddsBoost - ((aggression - 0.5) * 0.12);
-    return effective > threshold || Math.random() < (bot.bluffRate ?? 0.05) * 0.35;
+    const bluff = bot.bluffRate ?? 0.05;
+    const stack = Math.max(1, bot.chips + bot.committed);
+
+    // The higher the price relative to stack, the more confidence the bot needs.
+    // This prevents bots from auto-calling all-in just because the call covers their stack.
+    const stackPressure = Math.min(0.42, toCall / Math.max(80, stack));
+    const potOddsBoost = Math.min(0.18, (pot / Math.max(1, pot + toCall)) * 0.22);
+    const aggressionBoost = (aggression - 0.5) * 0.14;
+
+    // Short-stack calls are still possible, but only with enough confidence or personality.
+    const shortStackPenalty = toCall >= bot.chips ? 0.10 : 0;
+    const neededConfidence = 0.40 + stackPressure + shortStackPenalty - potOddsBoost - aggressionBoost;
+    const thinBluffCall = Math.random() < bluff * 0.20;
+
+    return effective >= neededConfidence || thinBluffCall;
   }
 
   async function takeBotTurn(seat) {
@@ -1881,7 +1902,7 @@
         allSeatIndexes(false).forEach(i => { if (i !== seat && !seatFolded(i) && !seatAllIn(i)) setSeatActed(i, false); });
         addLog(`${bot.name} raises to ${currentBet}.`);
         await showActionToast(`${bot.name} raises to ${currentBet}`, bot.name);
-      } else if (botShouldCall(bot, toCall) || toCall >= bot.chips) {
+      } else if (botShouldCall(bot, toCall)) {
         const callAmount = Math.min(toCall, bot.chips);
         bot.chips -= callAmount;
         bot.committed += callAmount;
@@ -1892,6 +1913,7 @@
         addLog(`${bot.name} ${callAmount < toCall ? 'goes all-in for' : 'calls'} ${callAmount}.`);
         await showActionToast(`${bot.name} ${callAmount < toCall ? 'goes all-in for' : 'calls'} ${callAmount}`, bot.name);
       } else {
+        // Bot had the option to call but lacked enough confidence for the price.
         bot.folded = true;
         bot.justFolded = true;
         bot.acted = true;
@@ -2109,6 +2131,22 @@
     }
     return false;
   }
+
+  window.debugBots = function() {
+    return botPlayers.map(bot => ({
+      name: bot.name,
+      chips: bot.chips,
+      folded: bot.folded,
+      allIn: bot.allIn,
+      committed: bot.committed,
+      acted: bot.acted,
+      confidence: bot.cards && bot.cards.length ? Number(botEffectiveConfidence(bot).toFixed(3)) : null,
+      aggression: Number((bot.agg ?? 0).toFixed(3)),
+      raiseTendency: Number((bot.raiseTendency ?? 0).toFixed(3)),
+      bluffRate: Number((bot.bluffRate ?? 0).toFixed(3)),
+      lastAction: bot.lastAction
+    }));
+  };
 
   document.getElementById('startBtn').addEventListener('click', async () => {
     const countInput = document.getElementById('botCount');
