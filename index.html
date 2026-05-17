@@ -87,6 +87,45 @@
     .card.red {
       color: #c62828;
     }
+    .card.face {
+      position: relative;
+      overflow: hidden;
+      justify-content: initial;
+      align-items: initial;
+      padding: 0;
+    }
+    .card .card-rank {
+      position: absolute;
+      font-weight: bold;
+      line-height: 1;
+      user-select: none;
+      font-size: clamp(.72rem, calc(var(--card-w, 70px) * .24), 1.05rem);
+    }
+    .card .card-rank.top-left {
+      top: 8%;
+      left: 9%;
+    }
+    .card .card-rank.bottom-right {
+      right: 9%;
+      bottom: 8%;
+      transform: rotate(180deg);
+    }
+    .card .card-suit-center {
+      position: absolute;
+      left: 50%;
+      top: 52%;
+      transform: translate(-50%, -50%);
+      font-weight: bold;
+      line-height: 1;
+      user-select: none;
+      font-size: clamp(1.05rem, calc(var(--card-w, 70px) * .46), 2rem);
+    }
+    .bot-card-row .card .card-rank {
+      font-size: clamp(.45rem, calc(var(--card-w, 70px) * .17), .68rem);
+    }
+    .bot-card-row .card .card-suit-center {
+      font-size: clamp(.72rem, calc(var(--card-w, 70px) * .32), 1.05rem);
+    }
     .card.back, .card.placeholder {
       color: rgba(255,255,255,0.88);
       border-color: rgba(255, 215, 0, 0.32);
@@ -423,11 +462,11 @@
     #botPanel {
       grid-area: bots;
       margin: 0;
-      padding: clamp(6px, 1vw, 10px);
-      overflow-y: auto;
+      padding: clamp(5px, .8vw, 9px);
+      overflow: visible;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
-      gap: clamp(5px, .9vw, 8px);
+      grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+      gap: clamp(4px, .7vw, 7px);
       align-content: start;
     }
     h3 {
@@ -488,12 +527,11 @@
       z-index: 2;
     }
     .bot-seat.folded .bot-name,
-    .bot-seat.folded .bot-meta,
-    .bot-seat.folded .bot-action {
+    .bot-seat.folded .bot-meta {
       color: rgba(255,255,255,.58);
-      text-decoration: line-through;
-      text-decoration-thickness: 2px;
-      text-decoration-color: rgba(255,255,255,.22);
+    }
+    .bot-seat.folded .bot-action {
+      display: none;
     }
     .bot-seat.folded .bot-card-row {
       transform: rotate(-3deg) translateY(1px);
@@ -585,6 +623,29 @@
     }
     #handRankDisplay, #confidenceDisplay { margin-top: 5px; padding: 5px 8px; font-size: clamp(.78rem, 2.2vw, .9rem); }
 
+
+
+    #game.compact-bots {
+      --card-w: clamp(38px, 7.6vw, 58px);
+      grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr);
+    }
+    #game.compact-bots #botPanel {
+      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+      gap: 4px;
+    }
+    #game.compact-bots .bot-seat {
+      padding: 5px;
+    }
+    #game.compact-bots .bot-line {
+      font-size: clamp(.65rem, 1.35vw, .78rem);
+      margin-bottom: 3px;
+    }
+    #game.compact-bots .bot-card-row .card {
+      width: clamp(23px, 3.9vw, 32px);
+      height: clamp(33px, 5.55vw, 46px);
+      min-width: clamp(23px, 3.9vw, 32px);
+    }
+
     @media (max-width: 760px) {
       .container { padding: 6px; }
       #game {
@@ -600,9 +661,13 @@
         gap: 6px;
       }
       #infoBar { font-size: .82rem; padding: 6px 8px; }
-      #botPanel { grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); max-height: 24dvh; }
+      #botPanel { grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); }
       #controls { position: sticky; bottom: 4px; z-index: 25; padding: 4px; background: rgba(4,24,10,.72); border-radius: 999px; backdrop-filter: blur(4px); }
       #controls button { min-height: 40px; flex-basis: 30%; padding: 8px 6px; }
+      #game.compact-bots { grid-template-rows: auto auto auto auto auto; }
+      #game.compact-bots #botPanel { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); }
+      #game.compact-bots .bot-line { font-size: .62rem; }
+      #game.compact-bots .bot-card-row .card { width: 22px; height: 31px; min-width: 22px; }
       #actionToast { top: 8px; min-width: 0; width: min(92vw, 390px); padding: 10px 14px; font-size: .92rem; }
     }
 
@@ -627,7 +692,7 @@
     <h1>Texas Hold'em Poker</h1>
     <div id="setup">
       <p>
-        <label>Number of bots (1–5):
+        <label>Number of bots (1–10):
           <input type="number" id="botCount" min="1" max="10" value="5"/>
         </label>
       </p>
@@ -724,13 +789,25 @@
       div.setAttribute('aria-label', placeholder ? 'Undealt card' : 'Hidden card');
       return div;
     }
+
+    const rank = rankNames[card.rank];
+    const suit = suitSymbol(card.suit);
+    div.classList.add('face');
     if (card.suit === 'H' || card.suit === 'D') div.classList.add('red');
+    div.setAttribute('aria-label', `${rank} ${suit}`);
+
     const top = document.createElement('div');
-    top.textContent = rankNames[card.rank];
+    top.className = 'card-rank top-left';
+    top.textContent = rank;
+
     const center = document.createElement('div');
-    center.textContent = suitSymbol(card.suit);
+    center.className = 'card-suit-center';
+    center.textContent = suit;
+
     const bottom = document.createElement('div');
-    bottom.textContent = rankNames[card.rank];
+    bottom.className = 'card-rank bottom-right';
+    bottom.textContent = rank;
+
     div.appendChild(top);
     div.appendChild(center);
     div.appendChild(bottom);
@@ -1002,10 +1079,13 @@
 
       const line = document.createElement('div');
       line.className = 'bot-line';
+      const actionHtml = bot.folded
+        ? ''
+        : `<span class="bot-action"><span class="bot-status ${status.toLowerCase()}">${status}</span> — ${bot.lastAction}</span>`;
       line.innerHTML = `
         <span class="bot-name">${bot.name}</span>
         <span class="bot-meta">💰 ${bot.chips}</span>
-        <span class="bot-action"><span class="bot-status ${status.toLowerCase()}">${status}</span> — ${bot.lastAction}</span>
+        ${actionHtml}
       `;
       seat.appendChild(line);
 
@@ -1161,29 +1241,47 @@
     });
   }
 
-  function waitForPlayerChoice() {
+  function resetControlLabels() {
+    const checkBtn = document.getElementById('checkBtn');
+    const betBtn = document.getElementById('betBtn');
+    const foldBtn = document.getElementById('foldBtn');
+    checkBtn.textContent = 'Check';
+    betBtn.textContent = 'Bet';
+    foldBtn.textContent = 'Fold';
+    betBtn.disabled = true;
+    checkBtn.disabled = true;
+    foldBtn.disabled = true;
+  }
+
+  function waitForPlayerChoice(options = {}) {
     return new Promise(resolve => {
       const checkBtn = document.getElementById('checkBtn');
       const betBtn = document.getElementById('betBtn');
       const foldBtn = document.getElementById('foldBtn');
+      const mode = options.mode || 'open';
+      const callAmount = options.callAmount || 0;
+
+      checkBtn.textContent = mode === 'call' ? `Call ${callAmount}` : 'Check';
+      betBtn.textContent = mode === 'call' ? 'Raise' : 'Bet';
+      foldBtn.textContent = 'Fold';
+
       checkBtn.disabled = false;
-      betBtn.disabled = false;
+      betBtn.disabled = mode === 'call'; // raising is left for a fuller betting-engine pass
       foldBtn.disabled = false;
       function disable() {
         checkBtn.disabled = true;
         betBtn.disabled = true;
         foldBtn.disabled = true;
+        setTimeout(resetControlLabels, 0);
       }
-      checkBtn.onclick = () => { disable(); resolve({action:'check'}); };
+      checkBtn.onclick = () => { disable(); resolve({action: mode === 'call' ? 'call' : 'check', amount: callAmount}); };
       betBtn.onclick = () => { disable(); resolve({action:'bet'}); };
       foldBtn.onclick = () => { disable(); resolve({action:'fold'}); };
     });
   }
 
   function disableControls() {
-    document.getElementById('checkBtn').disabled = true;
-    document.getElementById('betBtn').disabled = true;
-    document.getElementById('foldBtn').disabled = true;
+    resetControlLabels();
   }
 
   // Reset players for a new hand
@@ -1266,6 +1364,12 @@
 
   async function dealCommunityStage(nextStage) {
     stage = nextStage;
+    // Hold'em street order is: Pre-Flop betting, Flop reveal + betting,
+    // Turn reveal + betting, River reveal + betting, then Showdown.
+    if (nextStage === 'Pre-Flop') {
+      updateUI();
+      return;
+    }
     if (nextStage === 'Flop') {
       community.push(drawCard(deck), drawCard(deck), drawCard(deck));
       addLog('The flop is dealt.');
@@ -1467,17 +1571,10 @@
 
     if (highestBotBet > 0) {
       activePlayerName = 'You';
+      await showActionToast(`${betBotName || 'A bot'} bet ${highestBotBet}. Your action.`, 'You', 900);
       updateUI();
-      const call = await showDecisionModal({
-        title: 'Call or Fold?',
-        // Tell the player which bot placed the bet rather than using a generic message
-        message: `${(betBotName || 'A bot')} bet ${highestBotBet}. Call ${highestBotBet} to stay in the hand?`,
-        buttons: [
-          {label:`Call ${highestBotBet}`, value:'call'},
-          {label:'Fold', value:'fold', kind:'danger'}
-        ]
-      });
-      if (call === 'call' && playerChips >= highestBotBet) {
+      const response = await waitForPlayerChoice({mode: 'call', callAmount: highestBotBet});
+      if (response.action === 'call' && playerChips >= highestBotBet) {
         playerChips -= highestBotBet;
         pot += highestBotBet;
         addLog(`You call ${highestBotBet}.`);
@@ -1578,14 +1675,17 @@
     const countInput = document.getElementById('botCount');
     let count = parseInt(countInput.value, 10);
     if (!count || count < 1) count = 1;
-    if (count > 5) count = 5;
+    if (count > 10) count = 10;
     // Initialize player and bots
     const confCheckbox = document.getElementById('showConf');
     showConfidence = confCheckbox && confCheckbox.checked;
     playerChips = 2000;
     botPlayers = createBots(count);
+    const gameElem = document.getElementById('game');
+    gameElem.classList.toggle('compact-bots', count >= 7);
+    gameElem.dataset.botCount = String(count);
     document.getElementById('setup').style.display = 'none';
-    document.getElementById('game').style.display = 'block';
+    gameElem.style.display = 'grid';
     // Game loop
     async function loop() {
       if (gameOver()) return;
