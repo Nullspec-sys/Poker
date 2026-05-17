@@ -646,6 +646,21 @@
       min-width: clamp(23px, 3.9vw, 32px);
     }
 
+
+    .seat-badges { display: inline-flex; gap: 2px; vertical-align: middle; margin-left: 3px; }
+    .seat-badge {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px;
+      font-size: .68em; font-weight: 900; color: #071f0d; background: #ffd700;
+      box-shadow: 0 1px 4px rgba(0,0,0,.35);
+    }
+    .seat-badge.sb { background: #80cbc4; }
+    .seat-badge.bb { background: #ffb74d; }
+    .bot-committed {
+      grid-column: 1 / -1; color: #80cbc4; font-size: .86em;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .bot-status.all-in { background: rgba(251, 192, 45, .85); color: #201900; }
     @media (max-width: 760px) {
       .container { padding: 6px; }
       #game {
@@ -1038,13 +1053,26 @@
   let playerCards = [];
   let pot = 0;
   let stage = '';
-  // Bots now have individual aggressiveness values (0.0–1.0). There is no global aggressiveness.
-  let showConfidence = false; // whether to display hand confidence to the user
-  let activePlayerName = null; // highlights whose turn/action is currently being shown
-  let revealBotCards = false; // controls whether bot hole cards are face-up during showdown
-  let lastCommunityRenderCount = 0; // used to animate only newly dealt board cards
+  let showConfidence = false;
+  let activePlayerName = null;
+  let revealBotCards = false;
+  let lastCommunityRenderCount = 0;
   let animateCommunityReveal = false;
   let animateBotReveal = false;
+
+  // Proper Hold'em flow state
+  const SMALL_BLIND = 10;
+  const BIG_BLIND = 20;
+  let dealerIndex = 0;      // seat index: 0 = player, 1..N = bots
+  let dealerSeat = 0;
+  let smallBlindSeat = 0;
+  let bigBlindSeat = 0;
+  let currentBet = 0;
+  let minRaise = BIG_BLIND;
+  let playerFolded = false;
+  let playerAllIn = false;
+  let playerCommitted = 0;
+  let playerActed = false;
 
   const botNamePool = ['Amelia','Marcus','Sophia','Elias','Nora','Victor','Maya','Jonas','Clara','Dante','Iris','Theo','Elena','Caleb','Rhea'];
 
@@ -1053,33 +1081,178 @@
     const bots = [];
     for (let i=0; i<count; i++) {
       const name = i < names.length ? names[i] : `Bot ${i+1}`;
-      // Assign a random aggressiveness in the range 0.3–0.8. Higher values make the bot more likely to call/bet.
       const agg = 0.3 + Math.random() * 0.5;
-      bots.push({name: name, chips: 2000, cards: [], folded: false, justFolded: false, out: false, lastAction: 'Waiting', agg: agg});
+      bots.push({
+        name, chips: 2000, cards: [], folded: false, justFolded: false, out: false,
+        lastAction: 'Waiting', agg, committed: 0, acted: false, allIn: false
+      });
     }
     return bots;
   }
 
+  function allSeatIndexes(includeOut=false) {
+    const seats = [0];
+    botPlayers.forEach((bot, i) => {
+      if (includeOut || !bot.out) seats.push(i + 1);
+    });
+    return seats;
+  }
+
+  function activeSeatIndexes() {
+    return allSeatIndexes(false).filter(i => getSeatChips(i) > 0 || getSeatCommitted(i) > 0 || seatHasCards(i));
+  }
+
+  function seatName(index) {
+    return index === 0 ? 'You' : botPlayers[index - 1].name;
+  }
+
+  function seatIsBot(index) {
+    return index !== 0;
+  }
+
+  function getSeatBot(index) {
+    return botPlayers[index - 1];
+  }
+
+  function seatHasCards(index) {
+    return index === 0 ? playerCards.length > 0 : getSeatBot(index).cards.length > 0;
+  }
+
+  function getSeatCards(index) {
+    return index === 0 ? playerCards : getSeatBot(index).cards;
+  }
+
+  function getSeatChips(index) {
+    return index === 0 ? playerChips : getSeatBot(index).chips;
+  }
+
+  function setSeatChips(index, amount) {
+    if (index === 0) playerChips = amount;
+    else getSeatBot(index).chips = amount;
+  }
+
+  function getSeatCommitted(index) {
+    return index === 0 ? playerCommitted : getSeatBot(index).committed;
+  }
+
+  function setSeatCommitted(index, amount) {
+    if (index === 0) playerCommitted = amount;
+    else getSeatBot(index).committed = amount;
+  }
+
+  function addSeatCommitted(index, amount) {
+    setSeatCommitted(index, getSeatCommitted(index) + amount);
+  }
+
+  function seatFolded(index) {
+    return index === 0 ? playerFolded : getSeatBot(index).folded;
+  }
+
+  function setSeatFolded(index, value) {
+    if (index === 0) playerFolded = value;
+    else {
+      const bot = getSeatBot(index);
+      bot.folded = value;
+      if (value) bot.justFolded = true;
+    }
+  }
+
+  function seatAllIn(index) {
+    return index === 0 ? playerAllIn : getSeatBot(index).allIn;
+  }
+
+  function setSeatAllIn(index, value) {
+    if (index === 0) playerAllIn = value;
+    else getSeatBot(index).allIn = value;
+  }
+
+  function seatActed(index) {
+    return index === 0 ? playerActed : getSeatBot(index).acted;
+  }
+
+  function setSeatActed(index, value) {
+    if (index === 0) playerActed = value;
+    else getSeatBot(index).acted = value;
+  }
+
+  function setSeatLastAction(index, action) {
+    if (index === 0) return;
+    getSeatBot(index).lastAction = action;
+  }
+
+  function orderedSeatsStartingAfter(startSeat) {
+    const seats = allSeatIndexes(false).filter(i => seatHasCards(i) && !seatFolded(i));
+    if (seats.length === 0) return [];
+    const order = [];
+    for (let offset = 1; offset <= botPlayers.length + 1; offset++) {
+      const candidate = (startSeat + offset) % (botPlayers.length + 1);
+      if (seats.includes(candidate)) order.push(candidate);
+    }
+    return order;
+  }
+
+  function chooseButtonAndBlinds() {
+    const seats = allSeatIndexes(false).filter(i => getSeatChips(i) > 0);
+    if (seats.length < 2) return;
+    if (!seats.includes(dealerIndex)) {
+      dealerIndex = seats.find(i => i > dealerIndex) ?? seats[0];
+    }
+    dealerSeat = dealerIndex;
+    if (seats.length === 2) {
+      smallBlindSeat = dealerSeat;
+      bigBlindSeat = seats.find(i => i !== dealerSeat);
+    } else {
+      smallBlindSeat = orderedNextSeat(dealerSeat, seats);
+      bigBlindSeat = orderedNextSeat(smallBlindSeat, seats);
+    }
+  }
+
+  function orderedNextSeat(current, validSeats=null) {
+    const valid = validSeats ?? allSeatIndexes(false).filter(i => getSeatChips(i) > 0 || getSeatCommitted(i) > 0);
+    for (let offset = 1; offset <= botPlayers.length + 1; offset++) {
+      const candidate = (current + offset) % (botPlayers.length + 1);
+      if (valid.includes(candidate)) return candidate;
+    }
+    return current;
+  }
+
+  function rotateDealerButton() {
+    const seats = allSeatIndexes(false).filter(i => getSeatChips(i) > 0);
+    if (seats.length < 2) return;
+    dealerIndex = orderedNextSeat(dealerSeat, seats);
+  }
+
   function renderInfo() {
     const infoBar = document.getElementById('infoBar');
-    // Use icons for pot and player chips and distribute items evenly across the bar.
     infoBar.innerHTML = '';
     const stageSpan = document.createElement('span');
     stageSpan.textContent = `Stage: ${stage}`;
     const potSpan = document.createElement('span');
-    potSpan.textContent = `🪙 ${pot}`;
+    potSpan.textContent = `🪙 Pot ${pot}`;
+    const betSpan = document.createElement('span');
+    betSpan.textContent = currentBet > 0 ? `Bet ${currentBet}` : `Blinds ${SMALL_BLIND}/${BIG_BLIND}`;
     const chipsSpan = document.createElement('span');
     chipsSpan.textContent = `💰 ${playerChips}`;
     infoBar.appendChild(stageSpan);
     infoBar.appendChild(potSpan);
+    infoBar.appendChild(betSpan);
     infoBar.appendChild(chipsSpan);
+  }
+
+  function seatBadgeHtml(index) {
+    const badges = [];
+    if (index === dealerSeat) badges.push('<span class="seat-badge dealer">D</span>');
+    if (index === smallBlindSeat) badges.push('<span class="seat-badge sb">SB</span>');
+    if (index === bigBlindSeat) badges.push('<span class="seat-badge bb">BB</span>');
+    return badges.length ? `<span class="seat-badges">${badges.join('')}</span>` : '';
   }
 
   function renderBots(reveal=false) {
     const panel = document.getElementById('botPanel');
     panel.innerHTML = '';
-    botPlayers.forEach(bot => {
-      const status = bot.out ? 'OUT' : (bot.folded ? 'FOLDED' : 'ACTIVE');
+    botPlayers.forEach((bot, idx) => {
+      const seatIndex = idx + 1;
+      const status = bot.out ? 'OUT' : (bot.folded ? 'FOLDED' : (bot.allIn ? 'ALL-IN' : 'ACTIVE'));
       const seat = document.createElement('div');
       const foldedClass = (bot.folded ? ' folded' : '') + (bot.justFolded ? ' fold-burst' : '');
       seat.className = 'bot-seat' + (activePlayerName === bot.name ? ' active-turn' : '') + foldedClass;
@@ -1089,10 +1262,11 @@
       const actionHtml = bot.folded
         ? ''
         : `<span class="bot-action"><span class="bot-status ${status.toLowerCase()}">${status}</span> — ${bot.lastAction}</span>`;
+      const committedHtml = bot.committed > 0 && !bot.folded ? `<span class="bot-committed">In: ${bot.committed}</span>` : '';
       line.innerHTML = `
-        <span class="bot-name">${bot.name}</span>
+        <span class="bot-name">${bot.name} ${seatBadgeHtml(seatIndex)}</span>
         <span class="bot-meta">💰 ${bot.chips}</span>
-        ${actionHtml}
+        ${committedHtml}${actionHtml}
       `;
       seat.appendChild(line);
 
@@ -1101,7 +1275,7 @@
       if (bot.out || bot.cards.length === 0) {
         cardsDiv.appendChild(cardBackElement());
         cardsDiv.appendChild(cardBackElement());
-      } else if (reveal) {
+      } else if (reveal && !bot.folded) {
         bot.cards.forEach(c => cardsDiv.appendChild(cardElement(c, {flip: animateBotReveal})));
       } else {
         cardsDiv.appendChild(cardBackElement());
@@ -1136,45 +1310,42 @@
     playerCards.forEach(c => area.appendChild(cardElement(c)));
   }
 
-  // Display the player's current hand confidence, if enabled
   function renderConfidence() {
     const confDiv = document.getElementById('confidenceDisplay');
-    if (!showConfidence) {
+    if (!showConfidence || playerFolded) {
       confDiv.style.display = 'none';
       return;
     }
-    // Compute the confidence using the same function as for bots
     const conf = getBotConfidence(playerCards, community);
     const percent = Math.round(conf * 100);
-    confDiv.textContent = `Confidence: ${percent}%`;
+    confDiv.textContent = `Hand Strength: ${percent}%`;
     confDiv.style.display = 'block';
   }
 
-  // Display the player's current hand rank (High Card, Pair, etc.) and starting hand description.
   function renderHandRank() {
     const rankDiv = document.getElementById('handRankDisplay');
-    // Hide if element doesn't exist or no cards dealt yet
     if (!rankDiv) return;
     if (playerCards.length === 0) {
       rankDiv.style.display = 'none';
       rankDiv.textContent = '';
       return;
     }
-    // Before any community cards, show the starting hand description with suits
-    if (community.length === 0) {
-      const [c1, c2] = playerCards;
-      const r1 = rankNames[c1.rank];
-      const r2 = rankNames[c2.rank];
-      const sym1 = suitSymbol(c1.suit);
-      const sym2 = suitSymbol(c2.suit);
-      const suitedFlag = c1.suit === c2.suit;
-      rankDiv.textContent = `${r1}${sym1} & ${r2}${sym2}${suitedFlag ? ' (suited)' : ''}`;
+    const playerBadge = seatBadgeHtml(0);
+    const commitText = playerCommitted > 0 ? ` · In: ${playerCommitted}` : '';
+    if (playerFolded) {
+      rankDiv.innerHTML = `Folded ${playerBadge}${commitText}`;
       rankDiv.style.display = 'block';
       return;
     }
-    // With community cards, evaluate the best hand and display its name
+    if (community.length === 0) {
+      const [c1, c2] = playerCards;
+      const suitedFlag = c1.suit === c2.suit;
+      rankDiv.innerHTML = `${rankNames[c1.rank]}${suitSymbol(c1.suit)} & ${rankNames[c2.rank]}${suitSymbol(c2.suit)}${suitedFlag ? ' (suited)' : ''} ${playerBadge}${commitText}`;
+      rankDiv.style.display = 'block';
+      return;
+    }
     const evaluation = evaluateHand(playerCards.concat(community));
-    rankDiv.textContent = evaluation.name;
+    rankDiv.innerHTML = `${evaluation.name} ${playerBadge}${commitText}`;
     rankDiv.style.display = 'block';
   }
 
@@ -1189,19 +1360,13 @@
     if (playerArea) playerArea.classList.toggle('active-turn', activePlayerName === 'You');
   }
 
-
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  function randomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-  }
+  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+  function randomInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
   async function paceBotDecision(bot) {
     activePlayerName = bot.name;
     updateUI();
-    await sleep(randomInt(500, 1250));
+    await sleep(randomInt(450, 1050));
   }
 
   async function showActionToast(message, actorName=null, duration=null) {
@@ -1210,9 +1375,9 @@
     const toast = document.getElementById('actionToast');
     toast.textContent = message;
     toast.classList.add('show');
-    await sleep(duration ?? randomInt(950, 1400));
+    await sleep(duration ?? randomInt(800, 1200));
     toast.classList.remove('show');
-    await sleep(randomInt(220, 420));
+    await sleep(randomInt(160, 320));
   }
 
   function clearActivePlayer() {
@@ -1220,7 +1385,7 @@
     updateUI();
   }
 
-  function showDecisionModal({title, message, buttons, input=false, placeholder=''}) {
+  function showDecisionModal({title, message, buttons, input=false, placeholder='', min=null, max=null}) {
     return new Promise(resolve => {
       const modal = document.getElementById('decisionModal');
       const titleElem = document.getElementById('decisionTitle');
@@ -1233,6 +1398,8 @@
       inputElem.value = '';
       inputElem.placeholder = placeholder;
       inputElem.style.display = input ? 'block' : 'none';
+      if (min !== null) inputElem.min = String(min);
+      if (max !== null) inputElem.max = String(max);
       buttons.forEach(btn => {
         const b = document.createElement('button');
         b.textContent = btn.label;
@@ -1255,8 +1422,8 @@
     checkBtn.textContent = 'Check';
     betBtn.textContent = 'Bet';
     foldBtn.textContent = 'Fold';
-    betBtn.disabled = true;
     checkBtn.disabled = true;
+    betBtn.disabled = true;
     foldBtn.disabled = true;
   }
 
@@ -1265,40 +1432,45 @@
       const checkBtn = document.getElementById('checkBtn');
       const betBtn = document.getElementById('betBtn');
       const foldBtn = document.getElementById('foldBtn');
-      const mode = options.mode || 'open';
       const callAmount = options.callAmount || 0;
+      const canCheck = callAmount === 0;
+      const canRaise = options.canRaise ?? true;
+      const canBet = options.canBet ?? true;
 
-      checkBtn.textContent = mode === 'call' ? `Call ${callAmount}` : 'Check';
-      betBtn.textContent = mode === 'call' ? 'Raise' : 'Bet';
+      checkBtn.textContent = canCheck ? 'Check' : `Call ${callAmount}`;
+      betBtn.textContent = canCheck ? 'Bet' : 'Raise';
       foldBtn.textContent = 'Fold';
-
       checkBtn.disabled = false;
-      betBtn.disabled = mode === 'call'; // raising is left for a fuller betting-engine pass
+      betBtn.disabled = canCheck ? !canBet : !canRaise;
       foldBtn.disabled = false;
+
       function disable() {
         checkBtn.disabled = true;
         betBtn.disabled = true;
         foldBtn.disabled = true;
         setTimeout(resetControlLabels, 0);
       }
-      checkBtn.onclick = () => { disable(); resolve({action: mode === 'call' ? 'call' : 'check', amount: callAmount}); };
-      betBtn.onclick = () => { disable(); resolve({action:'bet'}); };
+      checkBtn.onclick = () => { disable(); resolve({action: canCheck ? 'check' : 'call', amount: callAmount}); };
+      betBtn.onclick = () => { disable(); resolve({action: canCheck ? 'bet' : 'raise'}); };
       foldBtn.onclick = () => { disable(); resolve({action:'fold'}); };
     });
   }
 
-  function disableControls() {
-    resetControlLabels();
-  }
+  function disableControls() { resetControlLabels(); }
 
-  // Reset players for a new hand
   function resetForNewHand() {
-    // Clear internal hand history for the new hand.
     actionHistory.length = 0;
+    playerFolded = false;
+    playerAllIn = false;
+    playerCommitted = 0;
+    playerActed = false;
     botPlayers.forEach(bot => {
       bot.cards = [];
       bot.folded = false;
       bot.justFolded = false;
+      bot.committed = 0;
+      bot.acted = false;
+      bot.allIn = false;
       if (bot.chips <= 0) {
         bot.out = true;
         bot.lastAction = 'Out';
@@ -1310,22 +1482,22 @@
     community = [];
     playerCards = [];
     pot = 0;
+    currentBet = 0;
+    minRaise = BIG_BLIND;
     revealBotCards = false;
     animateBotReveal = false;
     lastCommunityRenderCount = 0;
     animateCommunityReveal = false;
     stage = 'Pre-Flop';
+    chooseButtonAndBlinds();
     addLog('--- New Hand ---');
   }
 
-  // Display a modal with the winner(s) and wait for the user to proceed to the next hand.
-  // The provided message can contain newline characters, which are converted to line breaks.
   function showWinnerPopup(message) {
     return new Promise(resolve => {
       const modal = document.getElementById('winnerModal');
       const textElem = document.getElementById('winnerText');
       const button = document.getElementById('nextHandBtn');
-      // Convert newline characters to <br> for display
       textElem.innerHTML = message.replace(/\n/g, '<br>');
       modal.style.display = 'flex';
       const handler = () => {
@@ -1337,46 +1509,66 @@
     });
   }
 
-  // Ante collection
-  function anteCollect() {
-    const ante = 10;
-    playerChips -= ante;
-    pot += ante;
-    botPlayers.forEach(bot => {
-      if (!bot.out) {
-        const a = Math.min(ante, bot.chips);
-        bot.chips -= a;
-        pot += a;
-        bot.lastAction = `Ante ${a}`;
-      }
-    });
-    addLog(`Everyone antes ${ante}.`);
+  function postBlind(seat, amount, label) {
+    const posted = Math.min(amount, getSeatChips(seat));
+    setSeatChips(seat, getSeatChips(seat) - posted);
+    addSeatCommitted(seat, posted);
+    pot += posted;
+    if (getSeatChips(seat) === 0) setSeatAllIn(seat, true);
+    setSeatLastAction(seat, `${label} ${posted}`);
+    addLog(`${seatName(seat)} posts ${label.toLowerCase()} ${posted}.`);
   }
 
-  // Deal cards
+  function postBlinds() {
+    postBlind(smallBlindSeat, SMALL_BLIND, 'Small Blind');
+    postBlind(bigBlindSeat, BIG_BLIND, 'Big Blind');
+    currentBet = Math.max(getSeatCommitted(smallBlindSeat), getSeatCommitted(bigBlindSeat));
+    minRaise = BIG_BLIND;
+  }
+
   function dealCards() {
     deck = createDeck();
     playerCards = [drawCard(deck), drawCard(deck)];
     botPlayers.forEach(bot => {
-      if (!bot.out) {
-        bot.cards = [drawCard(deck), drawCard(deck)];
-      }
+      if (!bot.out && bot.chips > 0) bot.cards = [drawCard(deck), drawCard(deck)];
     });
   }
 
-  // Determine active bots (not out and not folded)
   function activeBots() {
     return botPlayers.filter(bot => !bot.out && !bot.folded);
   }
 
+  function activeContenderSeats() {
+    return allSeatIndexes(false).filter(i => seatHasCards(i) && !seatFolded(i));
+  }
+
+  function actionableSeats() {
+    return activeContenderSeats().filter(i => !seatAllIn(i) && getSeatChips(i) > 0);
+  }
+
+  function onlyOneContenderLeft() {
+    return activeContenderSeats().length <= 1;
+  }
+
+  function resetStreetCommitments() {
+    currentBet = 0;
+    minRaise = BIG_BLIND;
+    playerCommitted = 0;
+    playerActed = false;
+    botPlayers.forEach(bot => {
+      bot.committed = 0;
+      bot.acted = false;
+      if (!bot.out && !bot.folded && !bot.allIn) bot.lastAction = 'Waiting';
+    });
+  }
+
   async function dealCommunityStage(nextStage) {
     stage = nextStage;
-    // Hold'em street order is: Pre-Flop betting, Flop reveal + betting,
-    // Turn reveal + betting, River reveal + betting, then Showdown.
     if (nextStage === 'Pre-Flop') {
       updateUI();
       return;
     }
+    resetStreetCommitments();
     if (nextStage === 'Flop') {
       community.push(drawCard(deck), drawCard(deck), drawCard(deck));
       addLog('The flop is dealt.');
@@ -1389,253 +1581,211 @@
     }
     animateCommunityReveal = true;
     updateUI();
-    if (nextStage !== 'Pre-Flop') await sleep(650);
+    await sleep(650);
   }
 
-
-  // When the player folds, we still play out the remainder of the hand so that
-  // the remaining bots finish the round. This helper reveals any remaining
-  // community cards, evaluates each active bot's hand, splits the pot
-  // appropriately among the winners, updates the UI and log, and shows the
-  // winner popup. It mirrors the showdown logic but skips the player's
-  // involvement because they have folded.
-  /**
-   * When the player folds we still want to watch the rest of the hand play out.
-   * This helper deals the remaining community cards one stage at a time,
-   * shows simple bot actions (all bots check through the remaining streets),
-   * updates the UI between each stage, and finally performs a showdown
-   * amongst the remaining bots.  This avoids abruptly ending the hand
-   * immediately after a fold, giving the player a sense of how the round
-   * would have unfolded.
-   */
-  async function finishFoldHand() {
-    // Define the order of the stages for reference
-    const stages = ['Pre-Flop','Flop','Turn','River'];
-    // Find the current stage index so we know where to resume
-    let currentIndex = stages.indexOf(stage);
-    if (currentIndex < 0) currentIndex = 0;
-    // Play out the remaining streets. We skip the current stage because it
-    // already completed its betting round when the fold occurred.
-    for (let i = currentIndex + 1; i < stages.length; i++) {
-      await dealCommunityStage(stages[i]);
-      // Simulate that the remaining bots check this street. We don't
-      // implement a full betting tree here to keep the logic manageable
-      // after a fold. Bots simply check and we animate their actions.
-      for (const bot of activeBots()) {
-        // Only show actions for bots who are still in the pot
-        bot.lastAction = 'Checked';
-        addLog(`${bot.name} checks.`);
-        await showActionToast(`${bot.name} checks`, bot.name);
-      }
-      clearActivePlayer();
-      // Wait briefly between streets to pace the reveals
-      await sleep(randomInt(600, 1000));
+  function bettingComplete() {
+    const actionables = actionableSeats();
+    if (activeContenderSeats().length <= 1) return true;
+    if (actionables.length <= 1 && currentBet > 0) {
+      return actionables.every(i => getSeatCommitted(i) >= currentBet);
     }
-    // Once all community cards are dealt, determine the winner(s) among bots.
-    // Gather active bots (those not folded or out)
-    const contenders = [];
-    activeBots().forEach(bot => {
-      const h = evaluateHand(bot.cards.concat(community));
-      contenders.push({name: bot.name, eval: h, ref: bot});
-      bot.lastAction = h.name;
-      addLog(`${bot.name} has ${h.name}.`);
-    });
-    // If no contenders remain (all bots folded), just show that the hand is over
-    if (contenders.length === 0) {
-      updateUI();
-      await showWinnerPopup('Hand over.');
-      return;
-    }
-    // Determine the best hand among the bots
-    let best = contenders[0];
-    for (let i = 1; i < contenders.length; i++) {
-      if (compareHands(contenders[i].eval, best.eval) > 0) best = contenders[i];
-    }
-    const winners = contenders.filter(c => compareHands(c.eval, best.eval) === 0);
-    let share = Math.floor(pot / winners.length);
-    let remainder = pot - share * winners.length;
-    const popupMessages = [];
-    winners.forEach(w => {
-      let amount = share;
-      if (remainder > 0) { amount++; remainder--; }
-      w.ref.chips += amount;
-      w.ref.lastAction = `Won ${amount}`;
-      const msg = `${w.name} wins ${amount} chips.`;
-      addLog(msg);
-      popupMessages.push(msg);
-    });
-    revealBotCards = true;
-    animateBotReveal = true;
-    updateUI();
-    await showWinnerPopup(popupMessages.join('\n'));
+    return actionables.every(i => seatActed(i) && getSeatCommitted(i) === currentBet);
   }
 
-  // Resolve bot calls after a bet, one bot at a time so the table feels turn-based.
-  async function resolveBotCalls(betAmount, betterName) {
-    for (const bot of activeBots()) {
-      if (bot.name === betterName) continue;
-      await paceBotDecision(bot);
-      const conf = getBotConfidence(bot.cards, community);
-      let callChance = conf + 0.20 - (betAmount / 220);
-      callChance += ((bot.agg - 0.5) * 0.3);
-      if (callChance < 0) callChance = 0;
-      if (callChance > 1) callChance = 1;
-      if (bot.chips <= 0) {
-        bot.folded = true;
-        bot.justFolded = true;
-        bot.lastAction = 'Out of chips';
-        await showActionToast(`${bot.name} is out of chips`, bot.name);
-        continue;
-      }
-      const callAmount = Math.min(betAmount, bot.chips);
-      if (Math.random() < callChance) {
+  function botShouldRaise(bot, toCall) {
+    const conf = getBotConfidence(bot.cards, community);
+    const pressure = toCall > 0 ? toCall / 300 : 0;
+    let chance = (conf - 0.68) + ((bot.agg - 0.5) * 0.45) - pressure;
+    return Math.random() < Math.max(0, Math.min(0.28, chance));
+  }
+
+  function botShouldCall(bot, toCall) {
+    const conf = getBotConfidence(bot.cards, community);
+    let callChance = conf + 0.22 - (toCall / 240) + ((bot.agg - 0.5) * 0.3);
+    return Math.random() < Math.max(0.05, Math.min(0.96, callChance));
+  }
+
+  async function takeBotTurn(seat) {
+    const bot = getSeatBot(seat);
+    await paceBotDecision(bot);
+    const toCall = Math.max(0, currentBet - bot.committed);
+    const maxContribution = bot.chips;
+
+    if (toCall > 0) {
+      const canRaise = bot.chips > toCall + minRaise;
+      if (canRaise && botShouldRaise(bot, toCall)) {
+        const raiseBy = Math.min(bot.chips - toCall, minRaise + randomInt(0, 2) * BIG_BLIND);
+        const totalAdd = toCall + raiseBy;
+        bot.chips -= totalAdd;
+        bot.committed += totalAdd;
+        pot += totalAdd;
+        const previousBet = currentBet;
+        currentBet = bot.committed;
+        minRaise = Math.max(BIG_BLIND, currentBet - previousBet);
+        bot.acted = true;
+        bot.lastAction = `Raises to ${currentBet}`;
+        if (bot.chips === 0) bot.allIn = true;
+        // Re-open action for everyone else.
+        allSeatIndexes(false).forEach(i => { if (i !== seat && !seatFolded(i) && !seatAllIn(i)) setSeatActed(i, false); });
+        addLog(`${bot.name} raises to ${currentBet}.`);
+        await showActionToast(`${bot.name} raises to ${currentBet}`, bot.name);
+      } else if (botShouldCall(bot, toCall) || toCall >= bot.chips) {
+        const callAmount = Math.min(toCall, bot.chips);
         bot.chips -= callAmount;
+        bot.committed += callAmount;
         pot += callAmount;
-        bot.lastAction = `Called ${callAmount}`;
-        addLog(`${bot.name} calls ${callAmount}.`);
-        await showActionToast(`${bot.name} calls ${callAmount}`, bot.name);
+        bot.acted = true;
+        bot.lastAction = callAmount < toCall ? `All-in ${callAmount}` : `Called ${callAmount}`;
+        if (bot.chips === 0) bot.allIn = true;
+        addLog(`${bot.name} ${callAmount < toCall ? 'goes all-in for' : 'calls'} ${callAmount}.`);
+        await showActionToast(`${bot.name} ${callAmount < toCall ? 'goes all-in for' : 'calls'} ${callAmount}`, bot.name);
       } else {
         bot.folded = true;
         bot.justFolded = true;
+        bot.acted = true;
         bot.lastAction = 'Folded';
         addLog(`${bot.name} folds.`);
         await showActionToast(`${bot.name} folds`, bot.name);
       }
+      return;
     }
-    clearActivePlayer();
+
+    const conf = getBotConfidence(bot.cards, community);
+    let betChance = conf - 0.48 + ((bot.agg - 0.5) * 0.32);
+    if (Math.random() < Math.max(0, Math.min(0.42, betChance)) && bot.chips > 0) {
+      const bet = Math.min(bot.chips, BIG_BLIND + randomInt(0, 2) * BIG_BLIND);
+      bot.chips -= bet;
+      bot.committed += bet;
+      pot += bet;
+      currentBet = bot.committed;
+      minRaise = BIG_BLIND;
+      bot.acted = true;
+      bot.lastAction = `Bet ${bet}`;
+      if (bot.chips === 0) bot.allIn = true;
+      allSeatIndexes(false).forEach(i => { if (i !== seat && !seatFolded(i) && !seatAllIn(i)) setSeatActed(i, false); });
+      addLog(`${bot.name} bets ${bet}.`);
+      await showActionToast(`${bot.name} bets ${bet}`, bot.name);
+    } else {
+      bot.acted = true;
+      bot.lastAction = 'Checked';
+      addLog(`${bot.name} checks.`);
+      await showActionToast(`${bot.name} checks`, bot.name);
+    }
   }
 
-  // Betting round: returns 'PlayerFold','BotsFold','Continue' depending on outcome
-  async function bettingRound() {
-    botPlayers.forEach(bot => {
-      if (!bot.out && !bot.folded) bot.lastAction = 'Waiting';
-    });
+  async function takePlayerTurn() {
     activePlayerName = 'You';
     updateUI();
+    const toCall = Math.max(0, currentBet - playerCommitted);
+    const canRaise = playerChips > toCall;
+    const response = await waitForPlayerChoice({callAmount: toCall, canRaise, canBet: playerChips > 0});
 
-    const choice = await waitForPlayerChoice();
-
-    if (choice.action === 'fold') {
+    if (response.action === 'fold') {
+      playerFolded = true;
+      playerActed = true;
       addLog('You fold.');
       await showActionToast('You fold', 'You');
-      clearActivePlayer();
-      return 'PlayerFold';
+      return;
     }
 
-    if (choice.action === 'bet') {
-      const decision = await showDecisionModal({
-        title: 'Place a Bet',
-        message: `You have ${playerChips} chips. How much do you want to bet?`,
-        input: true,
-        placeholder: 'Bet amount',
-        buttons: [
-          {label:'Bet', value:'bet'},
-          {label:'Cancel', value:'cancel', kind:'secondary'}
-        ]
-      });
-      let amt = parseInt(decision.value, 10);
-      if (decision.action !== 'bet' || !amt || amt <= 0 || amt > playerChips) {
-        addLog('Invalid bet entered. You check instead.');
-        await showActionToast('Invalid bet — treated as check', 'You');
-        return 'Continue';
-      }
-      playerChips -= amt;
-      pot += amt;
-      addLog(`You bet ${amt}.`);
-      await showActionToast(`You bet ${amt}`, 'You');
-      await resolveBotCalls(amt, 'You');
-      return activeBots().length === 0 ? 'BotsFold' : 'Continue';
+    if (response.action === 'check') {
+      playerActed = true;
+      addLog('You check.');
+      await showActionToast('You check', 'You');
+      return;
     }
 
-    addLog('You check.');
-    await showActionToast('You check', 'You');
-
-    let highestBotBet = 0;
-    let betBotName = null;
-    for (const bot of activeBots()) {
-      await paceBotDecision(bot);
-      const conf = getBotConfidence(bot.cards, community);
-      let betChance = conf - 0.25;
-      betChance += ((bot.agg - 0.5) * 0.3);
-      if (betChance < 0) betChance = 0;
-      if (betChance > 1) betChance = 1;
-      if (Math.random() < betChance && bot.chips > 0) {
-        const bet = Math.min(25, bot.chips);
-        bot.chips -= bet;
-        pot += bet;
-        // Track the bot that placed the bet so we can reference them later
-        highestBotBet = Math.max(highestBotBet, bet);
-        betBotName = bot.name;
-        bot.lastAction = `Bet ${bet}`;
-        addLog(`${bot.name} bets ${bet}.`);
-        await showActionToast(`${bot.name} bets ${bet}`, bot.name);
-      } else {
-        bot.lastAction = 'Checked';
-        addLog(`${bot.name} checks.`);
-        await showActionToast(`${bot.name} checks`, bot.name);
-      }
+    if (response.action === 'call') {
+      const callAmount = Math.min(toCall, playerChips);
+      playerChips -= callAmount;
+      playerCommitted += callAmount;
+      pot += callAmount;
+      playerActed = true;
+      if (playerChips === 0) playerAllIn = true;
+      addLog(`You call ${callAmount}.`);
+      await showActionToast(callAmount < toCall ? `You go all-in for ${callAmount}` : `You call ${callAmount}`, 'You');
+      return;
     }
 
-    if (highestBotBet > 0) {
-      activePlayerName = 'You';
-      await showActionToast(`${betBotName || 'A bot'} bet ${highestBotBet}. Your action.`, 'You', 900);
-      updateUI();
-      const response = await waitForPlayerChoice({mode: 'call', callAmount: highestBotBet});
-      if (response.action === 'call' && playerChips >= highestBotBet) {
-        playerChips -= highestBotBet;
-        pot += highestBotBet;
-        addLog(`You call ${highestBotBet}.`);
-        await showActionToast(`You call ${highestBotBet}`, 'You');
-        await resolveBotCalls(highestBotBet, betBotName);
-        return activeBots().length === 0 ? 'BotsFold' : 'Continue';
-      }
-      addLog('You fold.');
-      await showActionToast('You fold', 'You');
-      clearActivePlayer();
-      return 'PlayerFold';
+    const isRaise = response.action === 'raise';
+    const minTotal = isRaise ? currentBet + minRaise : BIG_BLIND;
+    const maxTotal = playerCommitted + playerChips;
+    const decision = await showDecisionModal({
+      title: isRaise ? 'Raise' : 'Place a Bet',
+      message: isRaise
+        ? `Current bet is ${currentBet}. Minimum raise is to ${minTotal}. You can go up to ${maxTotal}.`
+        : `Minimum bet is ${BIG_BLIND}. You can bet up to ${maxTotal}.`,
+      input: true,
+      placeholder: isRaise ? `Total bet, e.g. ${minTotal}` : `Bet amount, e.g. ${BIG_BLIND}`,
+      min: minTotal,
+      max: maxTotal,
+      buttons: [
+        {label: isRaise ? 'Raise' : 'Bet', value:'bet'},
+        {label:'Cancel', value:'cancel', kind:'secondary'}
+      ]
+    });
+    let targetTotal = parseInt(decision.value, 10);
+    if (decision.action !== 'bet' || !targetTotal || targetTotal < minTotal || targetTotal > maxTotal) {
+      playerActed = false;
+      addLog('Invalid wager cancelled.');
+      await showActionToast('Invalid wager — choose again', 'You', 800);
+      return await takePlayerTurn();
     }
 
-    clearActivePlayer();
-    return 'Continue';
+    const addAmount = targetTotal - playerCommitted;
+    const previousBet = currentBet;
+    playerChips -= addAmount;
+    playerCommitted += addAmount;
+    pot += addAmount;
+    currentBet = playerCommitted;
+    minRaise = Math.max(BIG_BLIND, currentBet - previousBet);
+    playerActed = true;
+    if (playerChips === 0) playerAllIn = true;
+    allSeatIndexes(false).forEach(i => { if (i !== 0 && !seatFolded(i) && !seatAllIn(i)) setSeatActed(i, false); });
+    addLog(`You ${isRaise ? 'raise to' : 'bet'} ${currentBet}.`);
+    await showActionToast(`You ${isRaise ? 'raise to' : 'bet'} ${currentBet}`, 'You');
   }
 
-  async function playHand() {
-    resetForNewHand();
-    dealCards();
-    anteCollect();
-    updateUI();
-    disableControls();
-    // Stages: Pre-Flop, Flop, Turn, River
-    const stages = ['Pre-Flop','Flop','Turn','River'];
-    for (let i=0; i<stages.length; i++) {
-      await dealCommunityStage(stages[i]);
-      const result = await bettingRound();
-      if (result === 'PlayerFold') {
-        // The player folded; continue playing the hand out to reveal the outcome
-        await finishFoldHand();
-        return;
+  async function bettingRound(startAfterSeat) {
+    let order = orderedSeatsStartingAfter(startAfterSeat);
+    if (order.length === 0) return 'Continue';
+    let guard = 0;
+    while (!bettingComplete() && guard < 80) {
+      guard++;
+      for (const seat of order) {
+        if (bettingComplete()) break;
+        if (seatFolded(seat) || seatAllIn(seat) || getSeatChips(seat) <= 0) continue;
+        if (seatActed(seat) && getSeatCommitted(seat) === currentBet) continue;
+        if (seat === 0) await takePlayerTurn();
+        else await takeBotTurn(seat);
+        if (onlyOneContenderLeft()) break;
       }
-      if (result === 'BotsFold') {
-        // player wins pot
-        playerChips += pot;
-        addLog(`All bots folded. You win ${pot} chips.`);
-        updateUI();
-        await showWinnerPopup(`All bots folded. You win ${pot} chips.`);
-        return;
-      }
+      order = orderedSeatsStartingAfter(order.length ? order[order.length - 1] : startAfterSeat);
     }
-    // Showdown
+    clearActivePlayer();
+    return onlyOneContenderLeft() ? 'HandOver' : 'Continue';
+  }
+
+  function awardPotToLastContender() {
+    const winner = activeContenderSeats()[0];
+    if (winner === undefined) return 'Hand over.';
+    setSeatChips(winner, getSeatChips(winner) + pot);
+    const msg = `${seatName(winner)} wins ${pot} chips.`;
+    addLog(msg);
+    pot = 0;
+    return msg;
+  }
+
+  async function showdown() {
     stage = 'Showdown';
     addLog('Showdown.');
-    // Evaluate player
     const contenders = [];
-    const playerEval = evaluateHand(playerCards.concat(community));
-    contenders.push({name:'You', type:'Player', eval: playerEval});
-    activeBots().forEach(bot => {
-      const h = evaluateHand(bot.cards.concat(community));
-      contenders.push({name: bot.name, type:'Bot', eval: h, ref: bot});
-      bot.lastAction = h.name;
-      addLog(`${bot.name} has ${h.name}.`);
+    activeContenderSeats().forEach(seat => {
+      const h = evaluateHand(getSeatCards(seat).concat(community));
+      contenders.push({seat, name: seatName(seat), eval: h});
+      setSeatLastAction(seat, h.name);
+      addLog(`${seatName(seat)} has ${h.name}.`);
     });
     let best = contenders[0];
     for (let i=1; i<contenders.length; i++) {
@@ -1644,25 +1794,58 @@
     const winners = contenders.filter(c => compareHands(c.eval, best.eval) === 0);
     let share = Math.floor(pot / winners.length);
     let remainder = pot - share * winners.length;
-    // Accumulate messages for the popup
     const popupMessages = [];
     winners.forEach(w => {
       let amount = share;
       if (remainder > 0) { amount++; remainder--; }
-      if (w.type === 'Player') {
-        playerChips += amount;
-      } else {
-        w.ref.chips += amount;
-        w.ref.lastAction = `Won ${amount}`;
-      }
-      const msg = `${w.name} wins ${amount} chips.`;
+      setSeatChips(w.seat, getSeatChips(w.seat) + amount);
+      setSeatLastAction(w.seat, `Won ${amount}`);
+      const msg = `${w.name} wins ${amount} chips with ${w.eval.name}.`;
       addLog(msg);
       popupMessages.push(msg);
     });
+    pot = 0;
     revealBotCards = true;
     animateBotReveal = true;
     updateUI();
     await showWinnerPopup(popupMessages.join('\n'));
+  }
+
+  async function playHand() {
+    resetForNewHand();
+    dealCards();
+    postBlinds();
+    updateUI();
+    disableControls();
+
+    // Pre-flop: action starts left of the big blind.
+    stage = 'Pre-Flop';
+    updateUI();
+    let result = await bettingRound(bigBlindSeat);
+    if (result === 'HandOver') {
+      const msg = awardPotToLastContender();
+      updateUI();
+      await showWinnerPopup(msg);
+      rotateDealerButton();
+      return;
+    }
+
+    const streets = ['Flop', 'Turn', 'River'];
+    for (const street of streets) {
+      await dealCommunityStage(street);
+      // Post-flop: action starts left of the dealer button.
+      result = await bettingRound(dealerSeat);
+      if (result === 'HandOver') {
+        const msg = awardPotToLastContender();
+        updateUI();
+        await showWinnerPopup(msg);
+        rotateDealerButton();
+        return;
+      }
+    }
+
+    await showdown();
+    rotateDealerButton();
   }
 
   function gameOver() {
