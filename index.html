@@ -34,6 +34,93 @@
       background-color: rgba(0,0,0,0.4);
       border-radius: 8px;
     }
+    #setup {
+      width: min(100%, 760px);
+      margin: clamp(34px, 7vh, 60px) auto 0;
+      padding: 22px;
+      background-color: rgba(0,0,0,0.4);
+      border-radius: 8px;
+      text-align: center;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,.35);
+    }
+    #setup p {
+      margin: 12px 0;
+    }
+    #setup input[type="number"] {
+      width: 86px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,.2);
+      background: rgba(255,255,255,.95);
+      color: #111;
+      font-weight: 700;
+    }
+    #setup input[type="checkbox"] {
+      accent-color: #e9c94f;
+    }
+    #startBtn {
+      min-width: 160px;
+      font-size: 1rem;
+      padding: 11px 22px;
+    }
+    .setup-showcase {
+      position: relative;
+      height: 150px;
+      margin-top: 18px;
+      overflow: hidden;
+      border-radius: 12px;
+      background: linear-gradient(90deg, transparent, rgba(255,215,0,.035), transparent);
+      mask-image: linear-gradient(90deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+      -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 16%, #000 84%, transparent 100%);
+    }
+    .card-stream {
+      position: absolute;
+      inset: 0;
+    }
+    .stream-card {
+      position: absolute;
+      top: 18px;
+      left: 100%;
+      width: 78px;
+      height: 112px;
+      background: linear-gradient(#ffffff, #eeeeee);
+      color: #111;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,.16);
+      box-shadow: 0 13px 24px rgba(0,0,0,.3);
+      opacity: 0;
+      animation: cardDrift 9s linear infinite;
+    }
+    .stream-card.red { color: #c62828; }
+    .stream-card .corner {
+      position: absolute;
+      font-weight: 800;
+      font-size: .95rem;
+      line-height: 1;
+    }
+    .stream-card .corner.tl { top: 10px; left: 10px; }
+    .stream-card .corner.br { right: 10px; bottom: 10px; transform: rotate(180deg); }
+    .stream-card .pip {
+      position: absolute;
+      left: 50%;
+      top: 52%;
+      transform: translate(-50%, -50%);
+      font-size: 2rem;
+      line-height: 1;
+    }
+    .stream-card:nth-child(1) { animation-delay: 0s; transform: rotate(-7deg); }
+    .stream-card:nth-child(2) { animation-delay: 1.8s; transform: rotate(5deg); }
+    .stream-card:nth-child(3) { animation-delay: 3.6s; transform: rotate(-2deg); }
+    .stream-card:nth-child(4) { animation-delay: 5.4s; transform: rotate(8deg); }
+    .stream-card:nth-child(5) { animation-delay: 7.2s; transform: rotate(-5deg); }
+    @keyframes cardDrift {
+      0% { left: 108%; opacity: 0; }
+      10% { opacity: .95; }
+      50% { opacity: 1; }
+      90% { opacity: .95; }
+      100% { left: -18%; opacity: 0; }
+    }
     #game {
       display: none;
     }
@@ -231,6 +318,12 @@
     }
     .bot-name {
       font-weight: bold;
+    }
+    .seat-badges {
+      display: inline-flex;
+      gap: 3px;
+      vertical-align: middle;
+      margin-right: 5px;
     }
 
     /* Hand confidence display */
@@ -576,23 +669,27 @@
     .bot-action {
       grid-column: 1 / -1;
       color: #fff4bf;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      font-size: .93em;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      font-size: .9em;
+      line-height: 1.18;
     }
     .bot-status {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-width: 52px;
+      min-width: 48px;
       padding: 1px 6px;
       border-radius: 999px;
       font-size: .72em;
       font-weight: 900;
-      letter-spacing: .5px;
+      letter-spacing: .35px;
       background: rgba(46,125,50,.75);
       color: #efffed;
+      vertical-align: middle;
+      margin-right: 3px;
     }
     .bot-status.folded {
       background: rgba(150, 36, 36, .82);
@@ -663,8 +760,23 @@
     .bot-status.all-in { background: rgba(251, 192, 45, .85); color: #201900; }
     @media (max-width: 760px) {
       .container { padding: 6px; }
+      #setup {
+        margin-top: 18px;
+        padding: 18px 12px;
+      }
+      .setup-showcase {
+        height: 128px;
+        margin-top: 12px;
+      }
+      .stream-card {
+        width: 64px;
+        height: 92px;
+        top: 18px;
+      }
+      .stream-card .corner { font-size: .78rem; }
+      .stream-card .pip { font-size: 1.65rem; }
       #game {
-        --card-w: clamp(38px, 16.4vw, 56px);
+        --card-w: clamp(38px, 14.6vw, 52px);
         grid-template-areas:
           "info"
           "bots"
@@ -672,24 +784,40 @@
           "player"
           "controls";
         grid-template-columns: 1fr;
-        grid-template-rows: auto minmax(88px, 23dvh) auto auto auto;
+        grid-template-rows: auto minmax(168px, 30dvh) auto auto auto;
         gap: 6px;
       }
       #infoBar { font-size: .82rem; padding: 6px 8px; }
       #botPanel {
-        grid-template-columns: repeat(auto-fit, minmax(86px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         overflow-y: auto;
-        max-height: 23dvh;
-        min-height: 88px;
+        max-height: 30dvh;
+        min-height: 168px;
         overscroll-behavior: contain;
         scrollbar-width: thin;
+        padding: 6px;
+        gap: 5px;
       }
+      .table-section, #playerArea { padding: 8px 8px 10px; }
+      h3 { margin-bottom: 4px; }
+      #communityCards, #playerCards { gap: 3px; }
+      #playerCards { margin-top: 2px; }
+      #handRankDisplay, #confidenceDisplay { margin-top: 4px; padding: 4px 7px; }
+      .bot-seat { padding: 5px; }
+      .bot-line { gap: 4px; margin-bottom: 3px; font-size: .64rem; }
+      .bot-action { font-size: .78em; line-height: 1.12; }
+      .bot-status { min-width: 42px; padding: 1px 5px; letter-spacing: .2px; }
+      .bot-card-row .card { width: 21px; height: 30px; min-width: 21px; }
       #controls { position: sticky; bottom: 4px; z-index: 25; padding: 4px; background: rgba(4,24,10,.72); border-radius: 999px; backdrop-filter: blur(4px); }
       #controls button { min-height: 40px; flex-basis: 30%; padding: 8px 6px; }
-      #game.compact-bots { grid-template-rows: auto minmax(92px, 24dvh) auto auto auto; }
-      #game.compact-bots #botPanel { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); max-height: 24dvh; }
-      #game.compact-bots .bot-line { font-size: .62rem; }
-      #game.compact-bots .bot-card-row .card { width: 22px; height: 31px; min-width: 22px; }
+      #game.compact-bots { grid-template-rows: auto minmax(178px, 32dvh) auto auto auto; }
+      #game.compact-bots #botPanel {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        max-height: 32dvh;
+        min-height: 178px;
+      }
+      #game.compact-bots .bot-line { font-size: .6rem; }
+      #game.compact-bots .bot-card-row .card { width: 20px; height: 28px; min-width: 20px; }
       #actionToast { top: 8px; min-width: 0; width: min(92vw, 390px); padding: 10px 14px; font-size: .92rem; }
     }
 
@@ -715,7 +843,7 @@
     <div id="setup">
       <p>
         <label>Number of bots (1–10):
-          <input type="number" id="botCount" min="1" max="10" value="5"/>
+          <input type="number" id="botCount" min="1" max="10" value="4"/>
         </label>
       </p>
       <p>
@@ -727,6 +855,15 @@
       <p>
         <button id="startBtn">Start Game</button>
       </p>
+      <div class="setup-showcase" aria-hidden="true">
+        <div class="card-stream">
+          <div class="stream-card black"><span class="corner tl">A</span><span class="pip">♠</span><span class="corner br">A</span></div>
+          <div class="stream-card red"><span class="corner tl">K</span><span class="pip">♥</span><span class="corner br">K</span></div>
+          <div class="stream-card black"><span class="corner tl">Q</span><span class="pip">♣</span><span class="corner br">Q</span></div>
+          <div class="stream-card red"><span class="corner tl">J</span><span class="pip">♦</span><span class="corner br">J</span></div>
+          <div class="stream-card black"><span class="corner tl">10</span><span class="pip">♠</span><span class="corner br">10</span></div>
+        </div>
+      </div>
     </div>
     <div id="game">
       <div id="infoBar"></div>
@@ -1034,6 +1171,34 @@
     return conf;
   }
 
+
+  function botEffectiveConfidence(bot) {
+    const raw = getBotConfidence(bot.cards, community);
+    const stackPressure = currentBet > 0
+      ? Math.min(0.18, currentBet / Math.max(260, bot.chips + bot.committed))
+      : 0;
+    const biased = raw * (bot.confidenceBias ?? 1) * (bot.patience ?? 1);
+    return Math.max(0.02, Math.min(0.99, biased - stackPressure));
+  }
+
+  function botShouldBetOrRaise(bot, callAmount = 0) {
+    const effective = botEffectiveConfidence(bot);
+    const aggression = bot.agg ?? 0.5;
+    const raiseTendency = bot.raiseTendency ?? 0.35;
+    const bluff = bot.bluffRate ?? 0.05;
+    const pressure = callAmount > 0
+      ? Math.min(0.22, callAmount / Math.max(120, bot.chips + bot.committed))
+      : 0;
+    const streetBonus = community.length === 0 ? 0.00 : (community.length >= 4 ? 0.04 : 0.02);
+    const target = callAmount > 0 ? 0.60 : 0.50;
+    const edge = effective - pressure + streetBonus - target;
+    const chance = Math.max(
+      bluff * 0.45,
+      Math.min(0.72, edge + (aggression * 0.26) + (raiseTendency * 0.24))
+    );
+    return Math.random() < chance;
+  }
+
   // --- Game state and logic ---
   // Internal action history is retained for debugging, but the visible log was removed
   // so the table has more room and the action toast/seat states carry the visual flow.
@@ -1059,6 +1224,7 @@
   let lastCommunityRenderCount = 0;
   let animateCommunityReveal = false;
   let animateBotReveal = false;
+  let hasShownOpeningSequence = false;
 
   // Proper Hold'em flow state
   const SMALL_BLIND = 10;
@@ -1082,9 +1248,26 @@
     for (let i=0; i<count; i++) {
       const name = i < names.length ? names[i] : `Bot ${i+1}`;
       const agg = 0.3 + Math.random() * 0.5;
+      const confidenceBias = 0.88 + Math.random() * 0.30; // cautious to overconfident
+      const bluffRate = 0.04 + Math.random() * 0.12;
+      const patience = 0.86 + Math.random() * 0.28;
+      const raiseTendency = 0.22 + Math.random() * 0.48; // how willing this bot is to press an edge
       bots.push({
-        name, chips: 2000, cards: [], folded: false, justFolded: false, out: false,
-        lastAction: 'Waiting', agg, committed: 0, acted: false, allIn: false
+        name,
+        chips: 2000,
+        cards: [],
+        folded: false,
+        justFolded: false,
+        out: false,
+        lastAction: 'Waiting',
+        agg,
+        confidenceBias,
+        bluffRate,
+        patience,
+        raiseTendency,
+        committed: 0,
+        acted: false,
+        allIn: false
       });
     }
     return bots;
@@ -1239,6 +1422,10 @@
     infoBar.appendChild(chipsSpan);
   }
 
+  function isCompactMobileLayout() {
+    return window.matchMedia('(max-width: 760px)').matches;
+  }
+
   function seatBadgeHtml(index) {
     const badges = [];
     if (index === dealerSeat) badges.push('<span class="seat-badge dealer">D</span>');
@@ -1250,8 +1437,22 @@
   function renderBots(reveal=false) {
     const panel = document.getElementById('botPanel');
     panel.innerHTML = '';
-    botPlayers.forEach((bot, idx) => {
-      const seatIndex = idx + 1;
+    const seatEntries = botPlayers.map((bot, idx) => ({ bot, idx, seatIndex: idx + 1 }));
+
+    if (isCompactMobileLayout()) {
+      const seatWeight = (entry) => {
+        if (entry.bot.out) return 3;
+        if (entry.bot.folded) return 2;
+        if (entry.bot.allIn) return 1;
+        return 0;
+      };
+      seatEntries.sort((a, b) => {
+        const diff = seatWeight(a) - seatWeight(b);
+        return diff !== 0 ? diff : a.idx - b.idx;
+      });
+    }
+
+    seatEntries.forEach(({ bot, seatIndex }) => {
       const status = bot.out ? 'OUT' : (bot.folded ? 'FOLDED' : (bot.allIn ? 'ALL-IN' : 'ACTIVE'));
       const seat = document.createElement('div');
       const foldedClass = (bot.folded ? ' folded' : '') + (bot.justFolded ? ' fold-burst' : '');
@@ -1262,9 +1463,9 @@
       const actionHtml = bot.folded
         ? ''
         : `<span class="bot-action"><span class="bot-status ${status.toLowerCase()}">${status}</span> — ${bot.lastAction}</span>`;
-      const committedHtml = bot.committed > 0 && !bot.folded ? `<span class="bot-committed">In: ${bot.committed}</span>` : '';
+      const committedHtml = '';
       line.innerHTML = `
-        <span class="bot-name">${bot.name} ${seatBadgeHtml(seatIndex)}</span>
+        <span class="bot-name">${seatBadgeHtml(seatIndex)}${bot.name}</span>
         <span class="bot-meta">💰 ${bot.chips}</span>
         ${committedHtml}${actionHtml}
       `;
@@ -1367,6 +1568,13 @@
     activePlayerName = bot.name;
     updateUI();
     await sleep(randomInt(450, 1050));
+  }
+
+  async function showOpeningSequence() {
+    await showActionToast('Shuffling the deck...', null, 850);
+    await showActionToast('Posting the blinds...', null, 800);
+    await showActionToast('Dealing the opening hand...', null, 900);
+    hasShownOpeningSequence = true;
   }
 
   async function showActionToast(message, actorName=null, duration=null) {
@@ -1593,17 +1801,60 @@
     return actionables.every(i => seatActed(i) && getSeatCommitted(i) === currentBet);
   }
 
+  function chooseBotBetSize(bot) {
+    const effective = botEffectiveConfidence(bot);
+    const aggression = bot.agg ?? 0.5;
+    const raiseTendency = bot.raiseTendency ?? 0.35;
+    const pressure = Math.max(0, effective - 0.50);
+    const potBased = Math.max(BIG_BLIND, Math.round((pot * (0.18 + aggression * 0.10)) / 5) * 5);
+    const blindBased = BIG_BLIND + randomInt(0, 2) * SMALL_BLIND;
+    let amount = Math.max(BIG_BLIND, Math.min(potBased, blindBased + Math.round(pressure * BIG_BLIND * 3)));
+    if (Math.random() < 0.30 + raiseTendency * 0.25) {
+      amount += SMALL_BLIND * randomInt(0, 2);
+    }
+    amount = Math.round(amount / 5) * 5;
+    return Math.max(BIG_BLIND, Math.min(bot.chips, amount));
+  }
+
+  function chooseBotRaiseBy(bot, toCall) {
+    const availableRaise = bot.chips - toCall;
+    if (availableRaise <= 0) return 0;
+    const effective = botEffectiveConfidence(bot);
+    const aggression = bot.agg ?? 0.5;
+    const raiseTendency = bot.raiseTendency ?? 0.35;
+    const base = minRaise;
+    const confidenceExtra = Math.max(0, effective - 0.58) * BIG_BLIND * 2.2;
+    const personalityExtra = (aggression + raiseTendency) * SMALL_BLIND;
+    const randomExtra = SMALL_BLIND * randomInt(0, 2);
+    let raiseBy = base + confidenceExtra + personalityExtra + randomExtra;
+    const softCap = Math.max(minRaise, Math.round(Math.max(BIG_BLIND, pot * 0.28) / 5) * 5);
+    raiseBy = Math.min(raiseBy, softCap);
+    raiseBy = Math.round(raiseBy / 5) * 5;
+    return Math.max(minRaise, Math.min(availableRaise, raiseBy));
+  }
+
   function botShouldRaise(bot, toCall) {
-    const conf = getBotConfidence(bot.cards, community);
-    const pressure = toCall > 0 ? toCall / 300 : 0;
-    let chance = (conf - 0.68) + ((bot.agg - 0.5) * 0.45) - pressure;
-    return Math.random() < Math.max(0, Math.min(0.28, chance));
+    const effective = botEffectiveConfidence(bot);
+    const aggression = bot.agg ?? 0.5;
+    const raiseTendency = bot.raiseTendency ?? 0.35;
+    const bluff = bot.bluffRate ?? 0.05;
+    const stack = Math.max(1, bot.chips + bot.committed);
+    const pressure = Math.min(0.24, toCall / Math.max(120, stack));
+    const streetBonus = community.length === 0 ? 0.00 : (community.length >= 4 ? 0.035 : 0.02);
+    const personalityBoost = ((aggression - 0.5) * 0.12) + ((raiseTendency - 0.35) * 0.16);
+    const threshold = 0.61 - personalityBoost - streetBonus;
+    const valueChance = Math.max(0, Math.min(0.55, (effective - pressure - threshold) * 2.4 + raiseTendency * 0.14));
+    const pressureRaise = Math.random() < Math.max(0.01, bluff * aggression * raiseTendency * 0.65);
+    return Math.random() < valueChance || pressureRaise;
   }
 
   function botShouldCall(bot, toCall) {
-    const conf = getBotConfidence(bot.cards, community);
-    let callChance = conf + 0.22 - (toCall / 240) + ((bot.agg - 0.5) * 0.3);
-    return Math.random() < Math.max(0.05, Math.min(0.96, callChance));
+    const effective = botEffectiveConfidence(bot);
+    const aggression = bot.agg ?? 0.5;
+    const potOddsBoost = Math.min(0.20, (pot / Math.max(1, pot + toCall)) * 0.22);
+    const pricePenalty = Math.min(0.34, toCall / Math.max(70, bot.chips + bot.committed));
+    const threshold = 0.42 + pricePenalty - potOddsBoost - ((aggression - 0.5) * 0.12);
+    return effective > threshold || Math.random() < (bot.bluffRate ?? 0.05) * 0.35;
   }
 
   async function takeBotTurn(seat) {
@@ -1615,7 +1866,7 @@
     if (toCall > 0) {
       const canRaise = bot.chips > toCall + minRaise;
       if (canRaise && botShouldRaise(bot, toCall)) {
-        const raiseBy = Math.min(bot.chips - toCall, minRaise + randomInt(0, 2) * BIG_BLIND);
+        const raiseBy = chooseBotRaiseBy(bot, toCall);
         const totalAdd = toCall + raiseBy;
         bot.chips -= totalAdd;
         bot.committed += totalAdd;
@@ -1651,10 +1902,8 @@
       return;
     }
 
-    const conf = getBotConfidence(bot.cards, community);
-    let betChance = conf - 0.48 + ((bot.agg - 0.5) * 0.32);
-    if (Math.random() < Math.max(0, Math.min(0.42, betChance)) && bot.chips > 0) {
-      const bet = Math.min(bot.chips, BIG_BLIND + randomInt(0, 2) * BIG_BLIND);
+    if (botShouldBetOrRaise(bot, 0) && bot.chips > 0) {
+      const bet = chooseBotBetSize(bot);
       bot.chips -= bet;
       bot.committed += bet;
       pot += bet;
@@ -1861,7 +2110,7 @@
     return false;
   }
 
-  document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('startBtn').addEventListener('click', async () => {
     const countInput = document.getElementById('botCount');
     let count = parseInt(countInput.value, 10);
     if (!count || count < 1) count = 1;
