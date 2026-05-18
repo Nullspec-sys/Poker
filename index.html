@@ -1282,31 +1282,31 @@
 </head>
 <body>
   <div class="container">
-    <h1>Texas Hold'em Poker</h1>
+    <h1>Texas Hold'em Poker <span id="jokerBtn" title="Show debug options" style="margin-left: 8px; cursor: pointer; font-size: 1.6rem;">🃏</span></h1>
     <div id="setup">
       <p>
         <label>Number of bots (1–10):
           <input type="number" id="botCount" min="1" max="10" value="5"/>
         </label>
       </p>
-      <p>
-        <label>
-          <input type="checkbox" id="showConf" />
-          Show player hand confidence
-        </label>
-      </p>
-      <p>
-        <button id="startBtn">Start Game</button>
-        <button id="debugBtn" style="margin-left: 8px;">Debug Options</button>
-      </p>
-      <div id="debugMenu" style="display: none; margin-top: 8px; padding: 10px; background-color: rgba(0,0,0,0.35); border-radius: 8px;">
-        <p style="margin: 6px 0;">
+      <!-- Debug menu is hidden by default and toggled by clicking the Joker icon. -->
+      <div id="debugMenu" style="display:none; margin-top: 10px; padding: 10px; background-color: rgba(0,0,0,0.35); border-radius: 8px;">
+        <p style="margin:6px 0;">
+          <label>
+            <input type="checkbox" id="showPlayerConf" />
+            Show player hand confidence
+          </label>
+        </p>
+        <p style="margin:6px 0;">
           <label>
             <input type="checkbox" id="showBotConf" />
             Show bot confidence values
           </label>
         </p>
       </div>
+      <p>
+        <button id="startBtn">Start Game</button>
+      </p>
       <div class="setup-showcase" aria-hidden="true">
         <div class="card-stream">
           <div class="stream-card black"><span class="corner tl">A</span><span class="pip">♠</span><span class="corner br">A</span></div>
@@ -1319,7 +1319,7 @@
     </div>
     <div id="game">
       <div id="infoBar"></div>
-      <!-- Debug panel for bot confidence values -->
+      <!-- Panel that displays the bots' confidence values when debug is enabled -->
       <div id="botConfDisplay" style="display:none; font-size:0.8rem; line-height:1.2; margin:4px 0;"></div>
       <div id="botPanel" class="bot-grid"></div>
       <div class="table-section" id="communitySection">
@@ -1672,10 +1672,11 @@
   let playerCards = [];
   let pot = 0;
   let stage = '';
-  // Separate debug flags for displaying confidence values
+  // Debug flags controlling whether to show player and bot confidence values.
+  // Player confidence can be toggled via the debug menu. The legacy showConfidence
+  // variable is kept for compatibility but is derived from showPlayerConfidence.
   let showPlayerConfidence = false;
   let showBotConfidence = false;
-  // Deprecated: retained for backwards compatibility with older code
   let showConfidence = false;
   let activePlayerName = null;
   let revealBotCards = false;
@@ -1945,23 +1946,26 @@
       bot.justFolded = false;
     });
     animateBotReveal = false;
-    // Update the bot confidence debug display whenever bot seats are rendered
+
+    // Update debug display for bot confidence values after rendering all bots.
     updateBotConfidenceDisplay();
   }
 
-  // Render a debug panel showing each bot's current confidence value.
+  /**
+   * Render a debugging panel listing each bot's current confidence and status. This display
+   * is only shown when the showBotConfidence flag is true. The panel is hidden otherwise.
+   */
   function updateBotConfidenceDisplay() {
-    const debugDiv = document.getElementById('botConfDisplay');
-    if (!debugDiv) return;
-    // If the debug flag is false or all bot data is unavailable, hide the panel
+    const panel = document.getElementById('botConfDisplay');
+    if (!panel) return;
     if (!showBotConfidence) {
-      debugDiv.style.display = 'none';
-      debugDiv.innerHTML = '';
+      panel.style.display = 'none';
+      panel.innerHTML = '';
       return;
     }
-    // Build the content: show bot names and their confidence percentages
     const lines = [];
-    botPlayers.forEach((bot) => {
+    botPlayers.forEach(bot => {
+      // Compute confidence only if the bot is in the hand and has hole cards.
       let confVal = null;
       if (!bot.out && bot.cards && bot.cards.length) {
         confVal = botEffectiveConfidence(bot);
@@ -1970,8 +1974,8 @@
       const status = bot.out ? 'Out' : (bot.folded ? 'Folded' : (bot.allIn ? 'All-in' : 'Active'));
       lines.push(`${bot.name}: ${percent}% (${status})`);
     });
-    debugDiv.innerHTML = lines.join('<br/>');
-    debugDiv.style.display = 'block';
+    panel.innerHTML = lines.join('<br/>');
+    panel.style.display = 'block';
   }
 
   function renderCommunity() {
@@ -1998,7 +2002,7 @@
 
   function renderConfidence() {
     const confDiv = document.getElementById('confidenceDisplay');
-    // Use the new showPlayerConfidence flag instead of the deprecated showConfidence
+    // Show player confidence only if the debug flag is enabled and the player has not folded.
     if (!showPlayerConfidence || playerFolded) {
       confDiv.style.display = 'none';
       return;
@@ -2131,7 +2135,16 @@
       const canRaise = options.canRaise ?? true;
       const canBet = options.canBet ?? true;
 
-      checkBtn.textContent = canCheck ? 'Check' : `Call ${callAmount}`;
+      // For calls, show both the amount needed to call and the final total to reduce
+      // confusion.  The call amount is the difference between the current bet and
+      // the player's committed chips, whereas the total bet is currentBet.  On a
+      // check, simply label as Check.
+      if (canCheck) {
+        checkBtn.textContent = 'Check';
+      } else {
+        const totalTo = currentBet;
+        checkBtn.textContent = `Call ${callAmount} (to ${totalTo})`;
+      }
       betBtn.textContent = canCheck ? 'Bet' : 'Raise';
       foldBtn.textContent = 'Fold';
       checkBtn.disabled = false;
@@ -2336,10 +2349,21 @@
     const personalityBoost = ((aggression - 0.5) * 0.12) + ((raiseTendency - 0.35) * 0.16);
 
     // Do not allow random raise spam with weak confidence. Bluffs can happen,
-    // but only from bots whose personality supports it.
-    const threshold = 0.62 - personalityBoost - streetBonus;
-    const valueRaiseChance = Math.max(0, Math.min(0.48, (effective - pressure - threshold) * 2.2 + raiseTendency * 0.10));
-    const bluffRaiseChance = effective > 0.42 ? Math.max(0.005, bluff * aggression * raiseTendency * 0.45) : 0;
+    // but only from bots whose personality supports it.  To encourage more
+    // realistic play, bots now require a slightly higher baseline before
+    // raising, and the probability of a raise when marginal is lower.  The
+    // threshold was increased from 0.65 to 0.68 and the scaling on the value
+    // raise chance reduced.  Bluff raises are also rarer and require a
+    // moderately strong hand.
+    const threshold = 0.68 - personalityBoost - streetBonus;
+    // Limit the maximum raise frequency to 40%.  The effective-pressured gap
+    // determines how likely a value raise is, with the bot's individual
+    // tendency still contributing.  A negative gap results in zero chance.
+    const valueRaiseChance = Math.max(0, Math.min(0.40, (effective - pressure - threshold) * 2.0 + raiseTendency * 0.10));
+    // Bluff raises only occur when the bot has at least some semblance of
+    // strength (>0.48) and are far less frequent.  Aggressive and bluffing
+    // personalities influence this lightly.
+    const bluffRaiseChance = effective > 0.48 ? Math.max(0.003, bluff * aggression * raiseTendency * 0.35) : 0;
 
     return Math.random() < valueRaiseChance || Math.random() < bluffRaiseChance;
   }
@@ -2358,10 +2382,15 @@
 
     // Short-stack calls are still possible, but only with enough confidence or personality.
     const shortStackPenalty = toCall >= bot.chips ? 0.10 : 0;
-    // Require slightly more confidence to call, encouraging occasional folds. The base threshold
-    // was increased from 0.40 to 0.46 so bots won't mindlessly call small bets.
-    const neededConfidence = 0.46 + stackPressure + shortStackPenalty - potOddsBoost - aggressionBoost;
-    const thinBluffCall = Math.random() < bluff * 0.20;
+    // Require more confidence before calling.  The base threshold was increased again
+    // (from 0.48 to 0.54) so bots will fold more often rather than calling
+    // marginal hands.  Stack pressure, pot odds and aggression still adjust
+    // this threshold dynamically.
+    const neededConfidence = 0.54 + stackPressure + shortStackPenalty - potOddsBoost - aggressionBoost;
+    // Reduce the frequency of thin bluff calls to 8% instead of 12% to
+    // discourage reckless hero calls.  Bots with higher bluff rates will
+    // occasionally still call weak hands, but far less often.
+    const thinBluffCall = Math.random() < bluff * 0.08;
 
     return effective >= neededConfidence || thinBluffCall;
   }
@@ -2642,12 +2671,11 @@
     if (!count || count < 1) count = 1;
     if (count > 10) count = 10;
     // Initialize player and bots
-    const playerConfCheckbox = document.getElementById('showConf');
+    const playerConfCheckbox = document.getElementById('showPlayerConf');
     const botConfCheckbox = document.getElementById('showBotConf');
-    // Set the new debug flags based on checkboxes
     showPlayerConfidence = playerConfCheckbox && playerConfCheckbox.checked;
     showBotConfidence = botConfCheckbox && botConfCheckbox.checked;
-    // Maintain backwards compatibility by mirroring showPlayerConfidence into showConfidence
+    // Mirror to legacy flag
     showConfidence = showPlayerConfidence;
     playerChips = 2000;
     botPlayers = createBots(count);
@@ -2665,26 +2693,30 @@
     loop();
   });
 
-  // Toggle the debug options panel when the Debug Options button is clicked
-  document.getElementById('debugBtn').addEventListener('click', () => {
-    const menu = document.getElementById('debugMenu');
-    if (!menu) return;
-    menu.style.display = menu.style.display === 'none' || menu.style.display === '' ? 'block' : 'none';
-  });
+  // Toggle the debug menu when the Joker icon is clicked on the setup screen.
+  const jokerButton = document.getElementById('jokerBtn');
+  if (jokerButton) {
+    jokerButton.addEventListener('click', () => {
+      const menu = document.getElementById('debugMenu');
+      if (!menu) return;
+      menu.style.display = (menu.style.display === 'none' || menu.style.display === '') ? 'block' : 'none';
+    });
+  }
 
-  // Update debug flags when the user toggles the checkboxes, so they can take effect immediately
-  const playerConfCheckbox = document.getElementById('showConf');
-  if (playerConfCheckbox) {
-    playerConfCheckbox.addEventListener('change', () => {
-      showPlayerConfidence = playerConfCheckbox.checked;
-      showConfidence = showPlayerConfidence; // maintain backwards compatibility
+  // Update debug flags when the debug menu checkboxes are toggled. These listeners allow
+  // changing the debug settings before or during the game.
+  const playerConfCheckboxDbg = document.getElementById('showPlayerConf');
+  if (playerConfCheckboxDbg) {
+    playerConfCheckboxDbg.addEventListener('change', () => {
+      showPlayerConfidence = playerConfCheckboxDbg.checked;
+      showConfidence = showPlayerConfidence;
       renderConfidence();
     });
   }
-  const botConfCheckbox = document.getElementById('showBotConf');
-  if (botConfCheckbox) {
-    botConfCheckbox.addEventListener('change', () => {
-      showBotConfidence = botConfCheckbox.checked;
+  const botConfCheckboxDbg = document.getElementById('showBotConf');
+  if (botConfCheckboxDbg) {
+    botConfCheckboxDbg.addEventListener('change', () => {
+      showBotConfidence = botConfCheckboxDbg.checked;
       updateBotConfidenceDisplay();
     });
   }
