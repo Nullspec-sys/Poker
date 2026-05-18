@@ -1286,18 +1286,27 @@
     <div id="setup">
       <p>
         <label>Number of bots (1–10):
-          <input type="number" id="botCount" min="1" max="10" value="4"/>
+          <input type="number" id="botCount" min="1" max="10" value="5"/>
         </label>
       </p>
       <p>
         <label>
           <input type="checkbox" id="showConf" />
-          Show hand confidence while playing
+          Show player hand confidence
         </label>
       </p>
       <p>
         <button id="startBtn">Start Game</button>
+        <button id="debugBtn" style="margin-left: 8px;">Debug Options</button>
       </p>
+      <div id="debugMenu" style="display: none; margin-top: 8px; padding: 10px; background-color: rgba(0,0,0,0.35); border-radius: 8px;">
+        <p style="margin: 6px 0;">
+          <label>
+            <input type="checkbox" id="showBotConf" />
+            Show bot confidence values
+          </label>
+        </p>
+      </div>
       <div class="setup-showcase" aria-hidden="true">
         <div class="card-stream">
           <div class="stream-card black"><span class="corner tl">A</span><span class="pip">♠</span><span class="corner br">A</span></div>
@@ -1310,6 +1319,8 @@
     </div>
     <div id="game">
       <div id="infoBar"></div>
+      <!-- Debug panel for bot confidence values -->
+      <div id="botConfDisplay" style="display:none; font-size:0.8rem; line-height:1.2; margin:4px 0;"></div>
       <div id="botPanel" class="bot-grid"></div>
       <div class="table-section" id="communitySection">
         <h3>Community Cards</h3>
@@ -1620,31 +1631,8 @@
     const stackPressure = currentBet > 0
       ? Math.min(0.18, currentBet / Math.max(260, bot.chips + bot.committed))
       : 0;
-    // Incorporate the bot's baseline confidence into its overall assessment. The
-    // baseline is mapped into a modest multiplier between 0.8 and 1.2 so that
-    // bots born with higher confidence will perceive marginally stronger hands.
-    const baseMultiplier = bot.confidence !== undefined ? (0.8 + bot.confidence * 0.4) : 1;
-    const biased = raw * (bot.confidenceBias ?? 1) * (bot.patience ?? 1) * baseMultiplier;
+    const biased = raw * (bot.confidenceBias ?? 1) * (bot.patience ?? 1);
     return Math.max(0.02, Math.min(0.99, biased - stackPressure));
-  }
-
-  /**
-   * Update a bot's confidence property. Confidence is a per-hand dynamic value
-   * that starts as a random baseline when the bot is created and then evolves
-   * as the hand progresses. We base the updated value on the current
-   * hand strength (via getBotConfidence) plus a small amount of random noise.
-   *
-   * @param {Object} bot The bot whose confidence should be updated.
-   */
-  function updateBotConfidence(bot) {
-    // If the bot has no cards (e.g. busted out) there is nothing to update.
-    if (!bot || !bot.cards || bot.cards.length === 0) return;
-    // Calculate raw strength of current hand against community cards.
-    let conf = getBotConfidence(bot.cards, community);
-    // Add a small random component so bots don't play identically with the same hand.
-    const noise = (Math.random() - 0.5) * 0.1; // ±0.05 variance
-    conf = Math.max(0, Math.min(1, conf + noise));
-    bot.confidence = conf;
   }
 
   function botShouldBetOrRaise(bot, callAmount = 0) {
@@ -1684,6 +1672,10 @@
   let playerCards = [];
   let pot = 0;
   let stage = '';
+  // Separate debug flags for displaying confidence values
+  let showPlayerConfidence = false;
+  let showBotConfidence = false;
+  // Deprecated: retained for backwards compatibility with older code
   let showConfidence = false;
   let activePlayerName = null;
   let revealBotCards = false;
@@ -1691,13 +1683,6 @@
   let animateCommunityReveal = false;
   let animateBotReveal = false;
   let hasShownOpeningSequence = false;
-
-  // Queue of incoming bots. When an existing bot busts (loses all its chips),
-  // we schedule a replacement bot to join the table after a few hands. Each
-  // entry in this array is an object with a countdown (in hands) before
-  // spawning. This helps create a more lifelike flow of players coming and
-  // going from the table.
-  let pendingBotJoins = [];
 
   // Proper Hold'em flow state
   const SMALL_BLIND = 10;
@@ -1740,14 +1725,7 @@
         raiseTendency,
         committed: 0,
         acted: false,
-        allIn: false,
-        /**
-         * baseline confidence value for the bot. This number is intentionally
-         * randomised between 0.3 and 0.7 when the bot joins the table to
-         * ensure that bots do not play perfectly. It will be updated
-         * throughout the hand based on the cards dealt and the community cards.
-         */
-        confidence: 0.3 + Math.random() * 0.4
+        allIn: false
       });
     }
     return bots;
@@ -1967,6 +1945,33 @@
       bot.justFolded = false;
     });
     animateBotReveal = false;
+    // Update the bot confidence debug display whenever bot seats are rendered
+    updateBotConfidenceDisplay();
+  }
+
+  // Render a debug panel showing each bot's current confidence value.
+  function updateBotConfidenceDisplay() {
+    const debugDiv = document.getElementById('botConfDisplay');
+    if (!debugDiv) return;
+    // If the debug flag is false or all bot data is unavailable, hide the panel
+    if (!showBotConfidence) {
+      debugDiv.style.display = 'none';
+      debugDiv.innerHTML = '';
+      return;
+    }
+    // Build the content: show bot names and their confidence percentages
+    const lines = [];
+    botPlayers.forEach((bot) => {
+      let confVal = null;
+      if (!bot.out && bot.cards && bot.cards.length) {
+        confVal = botEffectiveConfidence(bot);
+      }
+      const percent = confVal !== null ? Math.round(confVal * 100) : '—';
+      const status = bot.out ? 'Out' : (bot.folded ? 'Folded' : (bot.allIn ? 'All-in' : 'Active'));
+      lines.push(`${bot.name}: ${percent}% (${status})`);
+    });
+    debugDiv.innerHTML = lines.join('<br/>');
+    debugDiv.style.display = 'block';
   }
 
   function renderCommunity() {
@@ -1993,7 +1998,8 @@
 
   function renderConfidence() {
     const confDiv = document.getElementById('confidenceDisplay');
-    if (!showConfidence || playerFolded) {
+    // Use the new showPlayerConfidence flag instead of the deprecated showConfidence
+    if (!showPlayerConfidence || playerFolded) {
       confDiv.style.display = 'none';
       return;
     }
@@ -2352,7 +2358,9 @@
 
     // Short-stack calls are still possible, but only with enough confidence or personality.
     const shortStackPenalty = toCall >= bot.chips ? 0.10 : 0;
-    const neededConfidence = 0.40 + stackPressure + shortStackPenalty - potOddsBoost - aggressionBoost;
+    // Require slightly more confidence to call, encouraging occasional folds. The base threshold
+    // was increased from 0.40 to 0.46 so bots won't mindlessly call small bets.
+    const neededConfidence = 0.46 + stackPressure + shortStackPenalty - potOddsBoost - aggressionBoost;
     const thinBluffCall = Math.random() < bluff * 0.20;
 
     return effective >= neededConfidence || thinBluffCall;
@@ -2360,8 +2368,6 @@
 
   async function takeBotTurn(seat) {
     const bot = getSeatBot(seat);
-    // update the bot's dynamic confidence before making a decision
-    updateBotConfidence(bot);
     await paceBotDecision(bot);
     const toCall = Math.max(0, currentBet - bot.committed);
     const maxContribution = bot.chips;
@@ -2601,54 +2607,14 @@
     rotateDealerButton();
   }
 
-  /**
-   * Handle bots leaving the table when they bust and schedule new bots to join.
-   *
-   * Whenever a bot's chips fall to zero at the end of a hand, that bot is marked
-   * as out and removed from active play. A replacement bot is then scheduled to
-   * join the table after a small delay (measured in hands) so the table remains
-   * populated. This keeps the game dynamic with different personalities entering
-   * and leaving over time.
-   */
-  async function handleBotEliminations() {
-    // Mark busted bots as out and add a pending replacement for each.
-    // First iterate through existing bots to see who has busted.
-    for (const bot of botPlayers) {
-      if (!bot.out && bot.chips <= 0) {
-        bot.out = true;
-        // Schedule a new bot to join after 2–3 hands.
-        const delay = 2 + Math.floor(Math.random() * 2);
-        pendingBotJoins.push({turns: delay});
-        const outMsg = `${bot.name} is out of chips and leaves the table.`;
-        addLog(outMsg);
-        // Show a toast but don't block the flow if actionToast is hidden.
-        await showActionToast(outMsg, bot.name, 800);
-      }
-    }
-    // Decrement timers and spawn new bots when their countdown reaches zero.
-    for (let i = pendingBotJoins.length - 1; i >= 0; i--) {
-      pendingBotJoins[i].turns--;
-      if (pendingBotJoins[i].turns <= 0) {
-        // Create a single new bot and append to the table.
-        const newBotArr = createBots(1);
-        const newBot = newBotArr[0];
-        botPlayers.push(newBot);
-        const joinMsg = `${newBot.name} joins the table with ${newBot.chips} chips.`;
-        addLog(joinMsg);
-        await showActionToast(joinMsg, newBot.name, 800);
-        pendingBotJoins.splice(i, 1);
-      }
-    }
-    // Re-render UI to reflect any seat changes. This also resets blinds as needed.
-    chooseButtonAndBlinds();
-    updateUI();
-  }
-
   function gameOver() {
-    // Only end the game if the player runs out of chips. Bots can come and go
-    // during play, so we do not end the game simply because no bots remain.
     if (playerChips <= 0) {
       alert('You are out of chips. The bots win.');
+      return true;
+    }
+    const aliveBots = botPlayers.filter(b => b.chips > 0);
+    if (aliveBots.length === 0) {
+      alert('All bots are out of chips. You win.');
       return true;
     }
     return false;
@@ -2676,8 +2642,13 @@
     if (!count || count < 1) count = 1;
     if (count > 10) count = 10;
     // Initialize player and bots
-    const confCheckbox = document.getElementById('showConf');
-    showConfidence = confCheckbox && confCheckbox.checked;
+    const playerConfCheckbox = document.getElementById('showConf');
+    const botConfCheckbox = document.getElementById('showBotConf');
+    // Set the new debug flags based on checkboxes
+    showPlayerConfidence = playerConfCheckbox && playerConfCheckbox.checked;
+    showBotConfidence = botConfCheckbox && botConfCheckbox.checked;
+    // Maintain backwards compatibility by mirroring showPlayerConfidence into showConfidence
+    showConfidence = showPlayerConfidence;
     playerChips = 2000;
     botPlayers = createBots(count);
     const gameElem = document.getElementById('game');
@@ -2689,13 +2660,34 @@
     async function loop() {
       if (gameOver()) return;
       await playHand();
-      // After each hand, process eliminations and spawn new bots as needed.
-      await handleBotEliminations();
-      // Continue the loop indefinitely while the player has chips.
       loop();
     }
     loop();
   });
+
+  // Toggle the debug options panel when the Debug Options button is clicked
+  document.getElementById('debugBtn').addEventListener('click', () => {
+    const menu = document.getElementById('debugMenu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'none' || menu.style.display === '' ? 'block' : 'none';
+  });
+
+  // Update debug flags when the user toggles the checkboxes, so they can take effect immediately
+  const playerConfCheckbox = document.getElementById('showConf');
+  if (playerConfCheckbox) {
+    playerConfCheckbox.addEventListener('change', () => {
+      showPlayerConfidence = playerConfCheckbox.checked;
+      showConfidence = showPlayerConfidence; // maintain backwards compatibility
+      renderConfidence();
+    });
+  }
+  const botConfCheckbox = document.getElementById('showBotConf');
+  if (botConfCheckbox) {
+    botConfCheckbox.addEventListener('change', () => {
+      showBotConfidence = botConfCheckbox.checked;
+      updateBotConfidenceDisplay();
+    });
+  }
   </script>
 </body>
 </html>
