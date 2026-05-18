@@ -2135,12 +2135,15 @@
       const canRaise = options.canRaise ?? true;
       const canBet = options.canBet ?? true;
 
-      // Label the check/call button appropriately.  For a check, the button simply
-      // says “Check”.  For a call, it shows only the amount needed to call.
+      // For calls, show both the amount needed to call and the final total to reduce
+      // confusion.  The call amount is the difference between the current bet and
+      // the player's committed chips, whereas the total bet is currentBet.  On a
+      // check, simply label as Check.
       if (canCheck) {
         checkBtn.textContent = 'Check';
       } else {
-        checkBtn.textContent = `Call ${callAmount}`;
+        const totalTo = currentBet;
+        checkBtn.textContent = `Call ${callAmount} (to ${totalTo})`;
       }
       betBtn.textContent = canCheck ? 'Bet' : 'Raise';
       foldBtn.textContent = 'Fold';
